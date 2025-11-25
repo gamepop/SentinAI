@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+option csharp_namespace = "SentinAI.Shared";
+
+package sentinai;
+
+// Service definition for communication between Sentinel Service and Brain
+service AgentService {
+  rpc RequestAnalysis(AnalysisRequest) returns (AnalysisResponse);
+  rpc TriggerAnalysis(TriggerAnalysisRequest) returns (TriggerAnalysisResponse);
+  rpc GetCleanupSuggestions(CleanupRequest) returns (CleanupSuggestions);
+  rpc ExecuteCleanup(CleanupCommand) returns (CleanupResult);
+  rpc GetServiceStatus(StatusRequest) returns (ServiceStatus);
+  rpc GetMonitoringActivity(MonitoringActivityRequest) returns (MonitoringActivityResponse);
+  rpc GetPendingSuggestions(PendingSuggestionsRequest) returns (PendingSuggestionsResponse);
+}
+
+message TriggerAnalysisRequest {
+  repeated string folder_paths = 1;
+  bool full_system_scan = 2;
+  string reason = 3;
+}
+
+message TriggerAnalysisResponse {
+  bool accepted = 1;
+  string analysis_id = 2;
+  string message = 3;
+  int32 folders_queued = 4;
+}
+
+message PendingSuggestionsRequest {
+}
+
+message PendingSuggestionsResponse {
+  repeated PendingAnalysis analyses = 1;
+}
+
+message PendingAnalysis {
+  string analysis_id = 1;
+  repeated CleanupItem suggestions = 2;
+  int64 total_bytes = 3;
+  string created_at = 4;
+  string scope = 5;
+}
+
+message AnalysisRequest {
+  repeated FileEvent events = 1;
+  string trigger_reason = 2;
+}
+
+message FileEvent {
+  string file_path = 1;
+  int64 size_bytes = 2;
+  int64 timestamp = 3;
+  string reason = 4;
+}
+
+message AnalysisResponse {
+  bool requires_user_review = 1;
+  string analysis_id = 2;
+}
+
+message CleanupRequest {
+  string folder_path = 1;
+  repeated string file_names = 2;
+}
+
+message CleanupSuggestions {
+  repeated CleanupItem items = 1;
+  int64 total_bytes_to_free = 2;
+  string reasoning = 3;
+}
+
+message CleanupItem {
+  string file_path = 1;
+  int64 size_bytes = 2;
+  string category = 3;
+  bool safe_to_delete = 4;
+  string reason = 5;
+  bool auto_approve = 6;
+}
+
+message CleanupCommand {
+  repeated string file_paths = 1;
+  string analysis_id = 2;
+  bool user_approved = 3;
+}
+
+message CleanupResult {
+  bool success = 1;
+  int32 files_deleted = 2;
+  int64 bytes_freed = 3;
+  repeated string errors = 4;
+}
+
+message StatusRequest {
+  bool detailed = 1;
+}
+
+message ServiceStatus {
+  bool is_running = 1;
+  bool is_monitoring = 2;
+  int64 uptime_seconds = 3;
+  int32 pending_analyses = 4;
+}
+
+message MonitoringActivityRequest {
+  int32 limit = 1;
+  int64 since_unix_time_ms = 2;
+}
+
+message MonitoringActivityResponse {
+  repeated MonitoringActivityItem items = 1;
+}
+
+message MonitoringActivityItem {
+  string id = 1;
+  string type = 2;
+  string scope = 3;
+  string drive = 4;
+  string state = 5;
+  string message = 6;
+  int64 timestamp_unix_time_ms = 7;
+  map<string, string> metadata = 8;
+}

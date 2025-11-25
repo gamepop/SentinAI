@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Brain UI",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-brain",
+      "program": "${workspaceFolder}/src/SentinAI.Brain/bin/Debug/net9.0-windows10.0.22621.0/win-x64/SentinAI.Brain.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/SentinAI.Brain",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    },
+    {
+      "name": "Launch Sentinel Service",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-service",
+      "program": "${workspaceFolder}/src/SentinAI.SentinelService/bin/Debug/net9.0-windows10.0.22621.0/win-x64/SentinAI.SentinelService.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/SentinAI.SentinelService",
+      "stopAtEntry": false,
+      "console": "internalConsole",
+      "requireExactSource": false
+    }
+  ]
+}

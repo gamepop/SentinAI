@@ -1,0 +1,31 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinAI.SentinelService", "src\SentinAI.SentinelService\SentinAI.SentinelService.csproj", "{A1234567-89AB-CDEF-0123-456789ABCDEF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinAI.Web", "src\SentinAI.Web\SentinAI.Web.csproj", "{D1234567-89AB-CDEF-0123-456789ABCDEF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinAI.Shared", "src\SentinAI.Shared\SentinAI.Shared.csproj", "{C1234567-89AB-CDEF-0123-456789ABCDEF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|x64
+		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|x64
+		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|x64
+		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|x64
+		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|x64
+		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|x64
+		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|x64
+		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|x64
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|x64
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|x64
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|x64
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+EndGlobal

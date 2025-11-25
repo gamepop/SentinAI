@@ -1,0 +1,25 @@
+{
+  "files.exclude": {
+    "**/bin": true,
+    "**/obj": true,
+    "**/.vs": true
+  },
+  "dotnet.defaultSolution": "SentinAI.sln",
+  "omnisharp.enableRoslynAnalyzers": true,
+  "omnisharp.enableEditorConfigSupport": true,
+  "[csharp]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+  "[xml]": {
+    "editor.formatOnSave": true
+  },
+  "files.associations": {
+    "*.xaml": "xml",
+    "*.csproj": "xml",
+    "*.props": "xml"
+  },
+  "dotnet.formatting.organizeImportsOnFormat": true
+}

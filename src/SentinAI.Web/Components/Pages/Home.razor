@@ -1,0 +1,50 @@
+﻿@page "/"
+
+<PageTitle>SentinAI - Autonomous Storage Agent</PageTitle>
+
+<div class="text-center">
+    <h1 class="display-4">Welcome to SentinAI</h1>
+    <p class="lead">Intelligent Windows Storage Management powered by AI</p>
+    
+    <div class="mt-4">
+        <a href="/dashboard" class="btn btn-primary btn-lg">
+            <span class="oi oi-dashboard"></span> Go to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">🔍 Intelligent Monitoring</h5>
+                <p class="card-text">
+                    Uses USN Journal to monitor your drive with minimal CPU usage. 
+                    Detects patterns like old node_modules, temp files, and heavy writes.
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">🤖 AI-Powered Analysis</h5>
+                <p class="card-text">
+                    Uses Phi-3 Mini AI model running locally with DirectML acceleration.
+                    Grounded in Winapp2 community cleanup rules for safe decisions.
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">✅ Safe by Design</h5>
+                <p class="card-text">
+                    Propose-Verify-Execute workflow ensures you review ambiguous decisions.
+                    Auto-approves only known-safe patterns like *.tmp and cache files.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
