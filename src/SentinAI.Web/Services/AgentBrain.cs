@@ -1,17 +1,30 @@
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
+using System.Text;
 using System.Text.Json;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntimeGenAI;
 using SentinAI.Shared.Models;
+using SentinAI.Web.Services.Rag;
 
 namespace SentinAI.Web.Services;
 
 public interface IAgentBrain
 {
     Task<bool> InitializeAsync(string modelPath);
-    Task<CleanupSuggestion> AnalyzeFolderAsync(string folderPath, List<string> fileNames);
-    Task<List<CleanupSuggestion>> AnalyzeFilesAsync(List<string> filePaths);
+    Task<CleanupSuggestion> AnalyzeFolderAsync(
+        string folderPath,
+        List<string> fileNames,
+        BrainSessionContext? sessionContext = null,
+        CancellationToken cancellationToken = default);
+
+    Task<List<CleanupSuggestion>> AnalyzeFilesAsync(
+        List<string> filePaths,
+        BrainSessionContext? sessionContext = null,
+        CancellationToken cancellationToken = default);
     bool IsReady { get; }
     bool IsModelLoaded { get; }
     string ExecutionProvider { get; }
@@ -35,6 +48,7 @@ public class AgentBrain : IAgentBrain, IDisposable
 {
     private readonly ILogger<AgentBrain> _logger;
     private readonly BrainConfiguration _config;
+    private readonly IRagStore _ragStore;
     private readonly SemaphoreSlim _modelLock = new(1, 1);
 
     private Model? _model;
@@ -53,10 +67,14 @@ public class AgentBrain : IAgentBrain, IDisposable
     public bool IsModelLoaded => _isModelLoaded;
     public string ExecutionProvider => _config.GetProviderDisplayName();
 
-    public AgentBrain(ILogger<AgentBrain> logger, IOptions<BrainConfiguration> config)
+    public AgentBrain(
+        ILogger<AgentBrain> logger,
+        IOptions<BrainConfiguration> config,
+        IRagStore ragStore)
     {
         _logger = logger;
         _config = config.Value;
+        _ragStore = ragStore;
     }
 
     public (int TotalAnalyses, int ModelDecisions, int HeuristicOnly, int SafeToDeleteCount) GetStats()
@@ -148,8 +166,13 @@ public class AgentBrain : IAgentBrain, IDisposable
         }
     }
 
-    public async Task<CleanupSuggestion> AnalyzeFolderAsync(string folderPath, List<string> fileNames)
+    public async Task<CleanupSuggestion> AnalyzeFolderAsync(
+        string folderPath,
+        List<string> fileNames,
+        BrainSessionContext? sessionContext = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _totalAnalyses++;
         var sw = Stopwatch.StartNew();
 
@@ -160,6 +183,12 @@ public class AgentBrain : IAgentBrain, IDisposable
         // STEP 1: Heuristic Analysis (fast, provides context for AI)
         // ═══════════════════════════════════════════════════════════════════
         var heuristicResult = RunHeuristicAnalysis(folderPath, fileNames);
+        var contextualMemories = await RetrieveMemoriesAsync(
+            sessionContext,
+            folderPath,
+            fileNames,
+            heuristicResult,
+            cancellationToken);
 
         _logger.LogInformation("📊 Heuristic pre-analysis: Category={Category}, Suggested={Safe}, Confidence={Confidence:P0}",
             heuristicResult.Category, heuristicResult.SafeToDelete, heuristicResult.Confidence);
@@ -176,7 +205,13 @@ public class AgentBrain : IAgentBrain, IDisposable
             try
             {
                 _logger.LogInformation("🔄 Starting AI inference for {Folder}...", folderPath);
-                finalResult = await GetModelDecisionAsync(folderPath, fileNames, heuristicResult);
+                finalResult = await GetModelDecisionAsync(
+                    folderPath,
+                    fileNames,
+                    heuristicResult,
+                    sessionContext,
+                    contextualMemories,
+                    cancellationToken);
                 _modelDecisions++;
 
                 var agreement = finalResult.SafeToDelete == heuristicResult.SafeToDelete ? "✅ AGREES" : "⚠️ OVERRIDES";
@@ -204,6 +239,14 @@ public class AgentBrain : IAgentBrain, IDisposable
         {
             _safeToDeleteCount++;
         }
+
+        await PersistMemoryAsync(
+            sessionContext,
+            folderPath,
+            fileNames,
+            heuristicResult,
+            finalResult,
+            cancellationToken);
 
         sw.Stop();
         _logger.LogInformation(
@@ -357,24 +400,117 @@ public class AgentBrain : IAgentBrain, IDisposable
         return suggestion;
     }
 
+    private async Task<IReadOnlyList<RagMemory>> RetrieveMemoriesAsync(
+        BrainSessionContext? sessionContext,
+        string folderPath,
+        List<string> fileNames,
+        CleanupSuggestion heuristicResult,
+        CancellationToken cancellationToken)
+    {
+        if (sessionContext == null || !_ragStore.IsEnabled)
+        {
+            return Array.Empty<RagMemory>();
+        }
+
+        var query = BuildMemoryQuery(sessionContext, folderPath, fileNames, heuristicResult);
+        var memories = await _ragStore.QueryAsync(sessionContext.SessionId, query, null, cancellationToken);
+
+        if (memories.Count > 0)
+        {
+            _logger.LogInformation("🧠 Retrieved {Count} memories for session {SessionId}", memories.Count, sessionContext.SessionId);
+        }
+
+        return memories;
+    }
+
+    private async Task PersistMemoryAsync(
+        BrainSessionContext? sessionContext,
+        string folderPath,
+        List<string> fileNames,
+        CleanupSuggestion heuristicResult,
+        CleanupSuggestion finalResult,
+        CancellationToken cancellationToken)
+    {
+        if (sessionContext == null || !_ragStore.IsEnabled)
+        {
+            return;
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine($"Folder: {folderPath}");
+        builder.AppendLine($"Decision: {(finalResult.SafeToDelete ? "SAFE" : "UNSAFE")} (confidence {finalResult.Confidence:F2})");
+        builder.AppendLine($"Reason: {finalResult.Reason ?? "n/a"}");
+        builder.AppendLine($"Heuristic: {heuristicResult.Category} safe={heuristicResult.SafeToDelete} conf={heuristicResult.Confidence:F2}");
+
+        var sampleFiles = string.Join(", ", fileNames.Take(5));
+        if (fileNames.Count > 5)
+        {
+            sampleFiles += $" (+{fileNames.Count - 5} more)";
+        }
+        builder.AppendLine($"Files: {sampleFiles}");
+
+        var metadata = new Dictionary<string, string>
+        {
+            ["folderPath"] = folderPath,
+            ["category"] = finalResult.Category ?? CleanupCategories.Unknown,
+            ["safeToDelete"] = finalResult.SafeToDelete.ToString(),
+            ["source"] = _isModelLoaded ? "AI" : "Heuristic"
+        };
+
+        if (!string.IsNullOrWhiteSpace(sessionContext.QueryHint))
+        {
+            metadata["queryHint"] = sessionContext.QueryHint!;
+        }
+
+        await _ragStore.StoreAsync(sessionContext.SessionId, builder.ToString(), metadata, cancellationToken);
+    }
+
+    private static string BuildMemoryQuery(
+        BrainSessionContext sessionContext,
+        string folderPath,
+        List<string> fileNames,
+        CleanupSuggestion heuristicResult)
+    {
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(sessionContext.QueryHint))
+        {
+            builder.AppendLine(sessionContext.QueryHint);
+        }
+        builder.AppendLine(folderPath);
+        builder.AppendLine($"Category:{heuristicResult.Category} Safe:{heuristicResult.SafeToDelete}");
+        builder.AppendLine($"Files:{string.Join(", ", fileNames.Take(5))}");
+        return builder.ToString();
+    }
+
     /// <summary>
     /// Step 2: AI model makes the final decision using heuristic context
     /// </summary>
     private async Task<CleanupSuggestion> GetModelDecisionAsync(
         string folderPath,
         List<string> fileNames,
-        CleanupSuggestion heuristicResult)
+        CleanupSuggestion heuristicResult,
+        BrainSessionContext? sessionContext,
+        IReadOnlyList<RagMemory> contextualMemories,
+        CancellationToken cancellationToken)
     {
         if (_model == null || _tokenizer == null)
         {
             return heuristicResult;
         }
 
-        await _modelLock.WaitAsync();
+        await _modelLock.WaitAsync(cancellationToken);
         try
         {
             // Build prompt with heuristic context
-            var prompt = BuildPrompt(folderPath, fileNames, heuristicResult);
+            var memories = contextualMemories ?? Array.Empty<RagMemory>();
+            if (memories.Count > 0)
+            {
+                _logger.LogInformation("📚 Injecting {Count} contextual memories into prompt for session {Session}",
+                    memories.Count,
+                    sessionContext?.SessionId ?? "n/a");
+            }
+
+            var prompt = BuildPrompt(folderPath, fileNames, heuristicResult, sessionContext, memories);
 
             _logger.LogDebug("📝 AI Prompt ({Length} chars)", prompt.Length);
 
@@ -448,7 +584,12 @@ public class AgentBrain : IAgentBrain, IDisposable
         }
     }
 
-    private static string BuildPrompt(string folderPath, List<string> fileNames, CleanupSuggestion heuristic)
+    private static string BuildPrompt(
+        string folderPath,
+        List<string> fileNames,
+        CleanupSuggestion heuristic,
+        BrainSessionContext? sessionContext,
+        IReadOnlyList<RagMemory> memories)
     {
         // Limit files to reduce token count - only show 10 most relevant
         var sampleFiles = string.Join(", ", fileNames.Take(10));
@@ -458,7 +599,7 @@ public class AgentBrain : IAgentBrain, IDisposable
         }
 
         // Compact prompt to minimize tokens while preserving context
-        var prompt = new System.Text.StringBuilder();
+        var prompt = new StringBuilder();
         prompt.AppendLine("<|system|>");
         prompt.AppendLine("You are a Windows cleanup safety analyzer. Decide if a folder is safe to delete.");
         prompt.AppendLine("Rules: Never delete user documents/photos. Temp/cache folders are safe. When in doubt, say no.");
@@ -469,6 +610,24 @@ public class AgentBrain : IAgentBrain, IDisposable
         prompt.AppendLine($"Files ({fileNames.Count}): {sampleFiles}");
         prompt.AppendLine($"Heuristic: {heuristic.Category}, safe={heuristic.SafeToDelete}, conf={heuristic.Confidence:F2}");
         prompt.AppendLine($"Heuristic reason: {heuristic.Reason}");
+        if (sessionContext != null)
+        {
+            prompt.AppendLine($"Session intent: {sessionContext.QueryHint ?? "unspecified"}");
+        }
+        if (memories.Count > 0)
+        {
+            prompt.AppendLine("Previous relevant analyses:");
+            var idx = 1;
+            foreach (var memory in memories.Take(3))
+            {
+                var summary = memory.Content.ReplaceLineEndings(" ");
+                if (summary.Length > 250)
+                {
+                    summary = summary[..250] + "...";
+                }
+                prompt.AppendLine($"Memory {idx++}: {summary}");
+            }
+        }
         prompt.AppendLine("Your JSON decision:");
         prompt.AppendLine("<|end|>");
         prompt.AppendLine("<|assistant|>");
@@ -529,7 +688,10 @@ public class AgentBrain : IAgentBrain, IDisposable
         };
     }
 
-    public async Task<List<CleanupSuggestion>> AnalyzeFilesAsync(List<string> filePaths)
+    public async Task<List<CleanupSuggestion>> AnalyzeFilesAsync(
+        List<string> filePaths,
+        BrainSessionContext? sessionContext = null,
+        CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
         _logger.LogInformation("📦 Batch analysis: {Count} files (Hybrid: Heuristics → AI)", filePaths.Count);
@@ -546,11 +708,16 @@ public class AgentBrain : IAgentBrain, IDisposable
 
         foreach (var group in filesByDir)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             dirCount++;
             _logger.LogInformation("📂 [{Current}/{Total}] Analyzing: {Dir}", dirCount, totalDirs, group.Key);
 
             var fileNames = group.Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToList();
-            var suggestion = await AnalyzeFolderAsync(group.Key, fileNames);
+            var suggestion = await AnalyzeFolderAsync(
+                group.Key,
+                fileNames,
+                sessionContext,
+                cancellationToken);
             suggestions.Add(suggestion);
         }
 

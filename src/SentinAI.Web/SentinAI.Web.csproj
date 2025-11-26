@@ -14,6 +14,8 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.8" />
     <!-- ONNX Runtime GenAI - CPU version (default, always works) -->
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.5.1" />
+    <!-- Cron expression parsing for scheduled tasks -->
+    <PackageReference Include="NCrontab" Version="3.3.3" />
   </ItemGroup>
 
   <ItemGroup>

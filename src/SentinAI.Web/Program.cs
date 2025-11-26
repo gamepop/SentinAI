@@ -5,6 +5,7 @@ using SentinAI.Shared;
 using SentinAI.Web.Components;
 using SentinAI.Web.Hubs;
 using SentinAI.Web.Services;
+using SentinAI.Web.Services.Rag;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,11 +35,43 @@ builder.Services.AddHostedService<MonitoringActivityWatcher>();
 // Configure Brain settings from appsettings.json
 builder.Services.Configure<BrainConfiguration>(
     builder.Configuration.GetSection(BrainConfiguration.SectionName));
+builder.Services.Configure<RagStoreOptions>(
+    builder.Configuration.GetSection(RagStoreOptions.SectionName));
+
+builder.Services.AddHttpClient<WeaviateRagStore>((sp, client) =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RagStoreOptions>>().Value;
+    if (!string.IsNullOrWhiteSpace(options.Endpoint))
+    {
+        client.BaseAddress = new Uri(options.Endpoint);
+    }
+    if (!string.IsNullOrWhiteSpace(options.ApiKey))
+    {
+        client.DefaultRequestHeaders.Remove("Authorization");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"Bearer {options.ApiKey}");
+    }
+});
+builder.Services.AddSingleton<NoopRagStore>();
+builder.Services.AddSingleton<IRagStore>(sp =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RagStoreOptions>>().Value;
+    if (!options.Enabled)
+    {
+        return sp.GetRequiredService<NoopRagStore>();
+    }
+    return sp.GetRequiredService<WeaviateRagStore>();
+});
 
 // Add Brain services
 builder.Services.AddSingleton<IAgentBrain, AgentBrain>();
 builder.Services.AddSingleton<IWinapp2Parser, Winapp2Parser>();
 builder.Services.AddSingleton<IModelDownloadService, ModelDownloadService>();
+
+// Add advanced feature services
+builder.Services.AddSingleton<IDuplicateFileService, DuplicateFileService>();
+builder.Services.AddSingleton<IScheduledCleanupService, ScheduledCleanupService>();
+builder.Services.AddHostedService(sp => (ScheduledCleanupService)sp.GetRequiredService<IScheduledCleanupService>());
+builder.Services.AddSingleton<IUsnJournalMonitorService, UsnJournalMonitorService>();
 
 // Add configuration manager
 builder.Services.AddSingleton<SentinAI.Shared.Services.IConfigurationManager, SentinAI.Shared.Services.ConfigurationManager>();

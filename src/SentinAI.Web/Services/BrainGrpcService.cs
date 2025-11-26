@@ -1,7 +1,8 @@
+using System.Diagnostics;
 using Grpc.Core;
 using SentinAI.Shared;
+using SentinAI.Shared.Models;
 using SentinAI.Web.Services;
-using System.Diagnostics;
 
 namespace SentinAI.Web.Services;
 
@@ -34,15 +35,15 @@ public class BrainGrpcService : AgentService.AgentServiceBase
         _totalRequests++;
         var sw = Stopwatch.StartNew();
         var requestId = Guid.NewGuid().ToString()[..8];
-        
+
         _logger.LogInformation(
             "📥 [{RequestId}] Brain gRPC request received | Folder: {Folder} | Files: {FileCount}",
             requestId,
             request.FolderPath,
             request.FileNames.Count);
-        
-        _logger.LogDebug("📄 [{RequestId}] File list: {Files}", 
-            requestId, 
+
+        _logger.LogDebug("📄 [{RequestId}] File list: {Files}",
+            requestId,
             string.Join(", ", request.FileNames.Take(20)));
 
         try
@@ -98,9 +99,16 @@ public class BrainGrpcService : AgentService.AgentServiceBase
             // Run analysis through the Brain service
             _logger.LogInformation("🧠 [{RequestId}] Starting Brain analysis...", requestId);
             var analysisStart = sw.ElapsedMilliseconds;
-            
-            var brainSuggestions = await _brain.AnalyzeFilesAsync(filePaths);
-            
+
+            var sessionContext = string.IsNullOrWhiteSpace(request.SessionId)
+                ? null
+                : new BrainSessionContext(request.SessionId, request.QueryHint, null);
+
+            var brainSuggestions = await _brain.AnalyzeFilesAsync(
+                filePaths,
+                sessionContext,
+                context.CancellationToken);
+
             var analysisDuration = sw.ElapsedMilliseconds - analysisStart;
             _logger.LogInformation("🧠 [{RequestId}] Brain analysis completed in {Duration}ms | {Count} suggestions",
                 requestId, analysisDuration, brainSuggestions?.Count ?? 0);
@@ -133,7 +141,8 @@ public class BrainGrpcService : AgentService.AgentServiceBase
                     Category = suggestion.Category,
                     SafeToDelete = suggestion.SafeToDelete,
                     Reason = suggestion.Reason,
-                    AutoApprove = suggestion.AutoApprove
+                    AutoApprove = suggestion.AutoApprove,
+                    Confidence = suggestion.Confidence  // Map AI confidence score
                 };
 
                 suggestions.Items.Add(item);
@@ -143,7 +152,7 @@ public class BrainGrpcService : AgentService.AgentServiceBase
             // Ground-truth check against Winapp2
             _logger.LogDebug("📋 [{RequestId}] Validating against Winapp2 rules...", requestId);
             var winapp2Overrides = 0;
-            
+
             foreach (var suggestion in suggestions.Items)
             {
                 var winapp2Safe = _winapp2Parser.IsSafeToDelete(suggestion.FilePath);
@@ -177,10 +186,10 @@ public class BrainGrpcService : AgentService.AgentServiceBase
 
             sw.Stop();
             _successfulRequests++;
-            
+
             var safeCount = suggestions.Items.Count(i => i.SafeToDelete);
             var autoApproveCount = suggestions.Items.Count(i => i.AutoApprove);
-            
+
             _logger.LogInformation(
                 "📤 [{RequestId}] Response ready in {Duration}ms | " +
                 "Safe: {SafeCount}/{Total} | AutoApprove: {AutoApprove} | Bytes: {Bytes:N0}",
@@ -196,9 +205,9 @@ public class BrainGrpcService : AgentService.AgentServiceBase
         catch (Exception ex)
         {
             sw.Stop();
-            _logger.LogError(ex, "❌ [{RequestId}] Brain analysis failed after {Duration}ms", 
+            _logger.LogError(ex, "❌ [{RequestId}] Brain analysis failed after {Duration}ms",
                 requestId, sw.ElapsedMilliseconds);
-            
+
             return new CleanupSuggestions
             {
                 TotalBytesToFree = 0,

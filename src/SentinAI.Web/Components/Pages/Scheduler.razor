@@ -1,0 +1,709 @@
+@page "/scheduler"
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Auto Cleanup - SentinAI</PageTitle>
+
+<div class="scheduler-container">
+    <div class="text-center mb-4">
+        <h1 class="display-6">⏰ Auto Cleanup</h1>
+        <p class="text-muted">Set up automatic cleanup to keep your PC running smoothly</p>
+    </div>
+
+    @* Quick Setup Cards *@
+    <div class="row justify-content-center mb-4">
+        <div class="col-lg-10">
+            <div class="row g-4">
+                @* Daily Cleanup Card *@
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm schedule-card @(HasSchedule("daily") ? "active" : "")">
+                        <div class="card-body text-center p-4">
+                            <div class="schedule-icon mb-3">
+                                <span class="display-4">🌅</span>
+                            </div>
+                            <h5 class="card-title">Daily Cleanup</h5>
+                            <p class="card-text text-muted small">
+                                Clean temp files and caches every day at 2 AM
+                            </p>
+                            <div class="schedule-status mt-3">
+                                @if (HasSchedule("daily"))
+                                {
+                                    <span class="badge bg-success mb-2">Active</span>
+                                    <button class="btn btn-outline-danger btn-sm d-block w-100" @onclick='() => RemoveQuickSchedule("daily")'>
+                                        Turn Off
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-primary d-block w-100" @onclick='() => AddQuickSchedule("daily")'>
+                                        Enable
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                @* Weekly Cleanup Card *@
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm schedule-card @(HasSchedule("weekly") ? "active" : "")">
+                        <div class="card-body text-center p-4">
+                            <div class="schedule-icon mb-3">
+                                <span class="display-4">📅</span>
+                            </div>
+                            <h5 class="card-title">Weekly Deep Clean</h5>
+                            <p class="card-text text-muted small">
+                                Thorough cleanup every Sunday at 3 AM
+                            </p>
+                            <div class="schedule-status mt-3">
+                                @if (HasSchedule("weekly"))
+                                {
+                                    <span class="badge bg-success mb-2">Active</span>
+                                    <button class="btn btn-outline-danger btn-sm d-block w-100" @onclick='() => RemoveQuickSchedule("weekly")'>
+                                        Turn Off
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-primary d-block w-100" @onclick='() => AddQuickSchedule("weekly")'>
+                                        Enable
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                @* Monthly Cleanup Card *@
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm schedule-card @(HasSchedule("monthly") ? "active" : "")">
+                        <div class="card-body text-center p-4">
+                            <div class="schedule-icon mb-3">
+                                <span class="display-4">🗓️</span>
+                            </div>
+                            <h5 class="card-title">Monthly Cleanup</h5>
+                            <p class="card-text text-muted small">
+                                Clean old downloads on the 1st of each month
+                            </p>
+                            <div class="schedule-status mt-3">
+                                @if (HasSchedule("monthly"))
+                                {
+                                    <span class="badge bg-success mb-2">Active</span>
+                                    <button class="btn btn-outline-danger btn-sm d-block w-100" @onclick='() => RemoveQuickSchedule("monthly")'>
+                                        Turn Off
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-primary d-block w-100" @onclick='() => AddQuickSchedule("monthly")'>
+                                        Enable
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Custom Schedule Section *@
+    <div class="row justify-content-center mb-4">
+        <div class="col-lg-10">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-0 pt-4 pb-0">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <span class="me-2">✨</span>
+                            Create Custom Schedule
+                        </h5>
+                        <button class="btn btn-link text-muted p-0" @onclick="() => showCustomForm = !showCustomForm">
+                            @(showCustomForm ? "Hide" : "Show")
+                        </button>
+                    </div>
+                </div>
+                @if (showCustomForm)
+                {
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">What to clean?</label>
+                                <select class="form-select" @bind="newTask.TaskType">
+                                    <option value="TempCleanup">🗑️ Temporary Files</option>
+                                    <option value="BrowserCache">🌐 Browser Cache</option>
+                                    <option value="DownloadsCleanup">📥 Old Downloads (30+ days)</option>
+                                    <option value="RecycleBin">🗄️ Recycle Bin</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">How often?</label>
+                                <select class="form-select" @bind="selectedFrequency">
+                                    <option value="daily">Every Day</option>
+                                    <option value="weekdays">Weekdays Only</option>
+                                    <option value="weekly">Once a Week</option>
+                                    <option value="monthly">Once a Month</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">What time?</label>
+                                <select class="form-select" @bind="selectedTime">
+                                    <option value="0">12:00 AM (Midnight)</option>
+                                    <option value="1">1:00 AM</option>
+                                    <option value="2">2:00 AM</option>
+                                    <option value="3">3:00 AM</option>
+                                    <option value="4">4:00 AM</option>
+                                    <option value="5">5:00 AM</option>
+                                    <option value="6">6:00 AM</option>
+                                    <option value="12">12:00 PM (Noon)</option>
+                                    <option value="18">6:00 PM</option>
+                                    <option value="22">10:00 PM</option>
+                                    <option value="23">11:00 PM</option>
+                                </select>
+                            </div>
+                            @if (selectedFrequency == "weekly")
+                            {
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold">Which day?</label>
+                                    <select class="form-select" @bind="selectedDayOfWeek">
+                                        <option value="0">Sunday</option>
+                                        <option value="1">Monday</option>
+                                        <option value="2">Tuesday</option>
+                                        <option value="3">Wednesday</option>
+                                        <option value="4">Thursday</option>
+                                        <option value="5">Friday</option>
+                                        <option value="6">Saturday</option>
+                                    </select>
+                                </div>
+                            }
+                        </div>
+                        
+                        <div class="mt-4">
+                            <button class="btn btn-success" @onclick="CreateCustomTask" disabled="@isCreating">
+                                @if (isCreating)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                <span>Create Schedule</span>
+                            </button>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(createMessage))
+                        {
+                            <div class="alert @createAlertClass mt-3 mb-0">@createMessage</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    @* Active Schedules *@
+    <div class="row justify-content-center mb-4">
+        <div class="col-lg-10">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-0 pt-4">
+                    <h5 class="mb-0">
+                        <span class="me-2">📋</span>
+                        Your Schedules
+                    </h5>
+                </div>
+                <div class="card-body">
+                    @if (isLoadingTasks)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-2 text-muted">Loading...</p>
+                        </div>
+                    }
+                    else if (tasks == null || !tasks.Any())
+                    {
+                        <div class="text-center py-4">
+                            <span class="display-1 text-muted opacity-50">📭</span>
+                            <p class="mt-3 text-muted">No cleanup schedules yet</p>
+                            <p class="small text-muted">Enable a quick schedule above or create a custom one!</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var task in tasks)
+                            {
+                                <div class="list-group-item px-0 py-3 d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center">
+                                        <span class="task-type-icon me-3">@GetTaskTypeEmoji(task.TaskType)</span>
+                                        <div>
+                                            <div class="fw-semibold">@task.Name</div>
+                                            <small class="text-muted">
+                                                @GetFriendlySchedule(task.CronExpression)
+                                                @if (task.NextRunTime.HasValue)
+                                                {
+                                                    <span class="ms-2">• Next: @task.NextRunTime.Value.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                                }
+                                            </small>
+                                        </div>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        @if (task.IsEnabled)
+                                        {
+                                            <span class="badge bg-success-subtle text-success">Active</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary">Paused</span>
+                                        }
+                                        <div class="dropdown">
+                                            <button class="btn btn-link text-muted p-1" data-bs-toggle="dropdown">
+                                                ⋮
+                                            </button>
+                                            <ul class="dropdown-menu dropdown-menu-end">
+                                                <li>
+                                                    <button class="dropdown-item" @onclick="() => RunTaskNow(task.Id)">
+                                                        ▶️ Run Now
+                                                    </button>
+                                                </li>
+                                                @if (task.IsEnabled)
+                                                {
+                                                    <li>
+                                                        <button class="dropdown-item" @onclick="() => ToggleTask(task.Id, false)">
+                                                            ⏸️ Pause
+                                                        </button>
+                                                    </li>
+                                                }
+                                                else
+                                                {
+                                                    <li>
+                                                        <button class="dropdown-item" @onclick="() => ToggleTask(task.Id, true)">
+                                                            ▶️ Resume
+                                                        </button>
+                                                    </li>
+                                                }
+                                                <li><hr class="dropdown-divider" /></li>
+                                                <li>
+                                                    <button class="dropdown-item text-danger" @onclick="() => DeleteTask(task.Id)">
+                                                        🗑️ Delete
+                                                    </button>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Recent Activity *@
+    @if (executionHistory != null && executionHistory.Any())
+    {
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-4">
+                        <h5 class="mb-0">
+                            <span class="me-2">📊</span>
+                            Recent Activity
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group list-group-flush">
+                            @foreach (var entry in executionHistory.Take(5))
+                            {
+                                <div class="list-group-item px-0 py-2 d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <span class="me-2">@(entry.Success ? "✅" : "❌")</span>
+                                        <span>@entry.TaskName</span>
+                                        <small class="text-muted ms-2">@entry.ExecutedAt.ToLocalTime().ToString("MMM d, h:mm tt")</small>
+                                    </div>
+                                    @if (entry.BytesFreed > 0)
+                                    {
+                                        <span class="badge bg-success-subtle text-success">@FormatBytes(entry.BytesFreed) freed</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .scheduler-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    .schedule-card {
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: 2px solid transparent !important;
+    }
+
+    .schedule-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
+    }
+
+    .schedule-card.active {
+        border-color: var(--bs-success) !important;
+        background: linear-gradient(to bottom, rgba(25, 135, 84, 0.05), transparent);
+    }
+
+    .schedule-icon {
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .task-type-icon {
+        font-size: 1.5rem;
+    }
+
+    .bg-success-subtle {
+        background-color: rgba(25, 135, 84, 0.1);
+    }
+
+    .bg-secondary-subtle {
+        background-color: rgba(108, 117, 125, 0.1);
+    }
+
+    .dropdown-toggle::after {
+        display: none;
+    }
+</style>
+
+@code {
+    private bool showCustomForm;
+    private NewTaskModel newTask = new();
+    private string selectedFrequency = "daily";
+    private int selectedTime = 2;
+    private int selectedDayOfWeek = 0;
+    private bool isCreating;
+    private string? createMessage;
+    private string createAlertClass = "alert-info";
+    
+    private List<ScheduledTaskDto>? tasks;
+    private bool isLoadingTasks = true;
+    
+    private List<ExecutionHistoryDto>? executionHistory;
+
+    // Quick schedule identifiers
+    private const string DailyScheduleName = "[Auto] Daily Cleanup";
+    private const string WeeklyScheduleName = "[Auto] Weekly Deep Clean";
+    private const string MonthlyScheduleName = "[Auto] Monthly Downloads Cleanup";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTasks();
+        await LoadHistory();
+    }
+
+    private bool HasSchedule(string type)
+    {
+        if (tasks == null) return false;
+        return type switch
+        {
+            "daily" => tasks.Any(t => t.Name == DailyScheduleName),
+            "weekly" => tasks.Any(t => t.Name == WeeklyScheduleName),
+            "monthly" => tasks.Any(t => t.Name == MonthlyScheduleName),
+            _ => false
+        };
+    }
+
+    private async Task AddQuickSchedule(string type)
+    {
+        var (name, cron, taskType, description) = type switch
+        {
+            "daily" => (DailyScheduleName, "0 2 * * *", "TempCleanup", "Cleans temp files and caches daily at 2 AM"),
+            "weekly" => (WeeklyScheduleName, "0 3 * * 0", "BrowserCache", "Deep cleans browser cache every Sunday at 3 AM"),
+            "monthly" => (MonthlyScheduleName, "0 4 1 * *", "DownloadsCleanup", "Cleans old downloads on the 1st of each month"),
+            _ => ("", "", "", "")
+        };
+
+        if (string.IsNullOrEmpty(name)) return;
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            var request = new
+            {
+                Name = name,
+                Description = description,
+                CronExpression = cron,
+                TaskType = taskType,
+                TargetPath = "",
+                FileAgeDays = 30,
+                IsEnabled = true
+            };
+            
+            await httpClient.PostAsJsonAsync("api/scheduler/tasks", request);
+            await LoadTasks();
+        }
+        catch
+        {
+            // Silently fail
+        }
+    }
+
+    private async Task RemoveQuickSchedule(string type)
+    {
+        if (tasks == null) return;
+        
+        var name = type switch
+        {
+            "daily" => DailyScheduleName,
+            "weekly" => WeeklyScheduleName,
+            "monthly" => MonthlyScheduleName,
+            _ => ""
+        };
+
+        var task = tasks.FirstOrDefault(t => t.Name == name);
+        if (task != null)
+        {
+            await DeleteTask(task.Id);
+        }
+    }
+
+    private string BuildCronExpression()
+    {
+        var hour = selectedTime;
+        return selectedFrequency switch
+        {
+            "daily" => $"0 {hour} * * *",
+            "weekdays" => $"0 {hour} * * 1-5",
+            "weekly" => $"0 {hour} * * {selectedDayOfWeek}",
+            "monthly" => $"0 {hour} 1 * *",
+            _ => $"0 {hour} * * *"
+        };
+    }
+
+    private string GetTaskTypeName(string taskType) => taskType switch
+    {
+        "TempCleanup" => "Temporary Files",
+        "BrowserCache" => "Browser Cache",
+        "DownloadsCleanup" => "Old Downloads",
+        "RecycleBin" => "Recycle Bin",
+        _ => taskType
+    };
+
+    private string GetTaskTypeEmoji(string taskType) => taskType switch
+    {
+        "TempCleanup" => "🗑️",
+        "BrowserCache" => "🌐",
+        "DownloadsCleanup" => "📥",
+        "RecycleBin" => "🗄️",
+        "DuplicateScan" => "📂",
+        "CustomFolder" => "📁",
+        _ => "📋"
+    };
+
+    private string GetFriendlySchedule(string cron)
+    {
+        // Simple cron parsing for common patterns
+        var parts = cron.Split(' ');
+        if (parts.Length < 5) return cron;
+
+        var hour = int.TryParse(parts[1], out var h) ? h : 0;
+        var timeStr = hour == 0 ? "12:00 AM" : hour < 12 ? $"{hour}:00 AM" : hour == 12 ? "12:00 PM" : $"{hour - 12}:00 PM";
+
+        if (parts[4] == "*" && parts[3] == "*" && parts[2] == "*")
+            return $"Daily at {timeStr}";
+        if (parts[4] == "1-5")
+            return $"Weekdays at {timeStr}";
+        if (parts[4] == "0")
+            return $"Sundays at {timeStr}";
+        if (parts[2] == "1" && parts[3] == "*")
+            return $"Monthly on the 1st at {timeStr}";
+        
+        var days = new[] { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+        if (int.TryParse(parts[4], out var dayNum) && dayNum >= 0 && dayNum <= 6)
+            return $"{days[dayNum]}s at {timeStr}";
+
+        return cron;
+    }
+
+    private async Task LoadTasks()
+    {
+        isLoadingTasks = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            tasks = await httpClient.GetFromJsonAsync<List<ScheduledTaskDto>>("api/scheduler/tasks");
+        }
+        catch
+        {
+            tasks = new List<ScheduledTaskDto>();
+        }
+        finally
+        {
+            isLoadingTasks = false;
+        }
+    }
+
+    private async Task LoadHistory()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            executionHistory = await httpClient.GetFromJsonAsync<List<ExecutionHistoryDto>>("api/scheduler/history?count=20");
+        }
+        catch
+        {
+            executionHistory = new List<ExecutionHistoryDto>();
+        }
+    }
+
+    private async Task CreateCustomTask()
+    {
+        isCreating = true;
+        createMessage = null;
+        
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            var cronExpr = BuildCronExpression();
+            var friendlyName = $"{GetTaskTypeName(newTask.TaskType)} - {GetFriendlySchedule(cronExpr)}";
+            
+            var request = new
+            {
+                Name = friendlyName,
+                Description = $"Custom schedule: {GetFriendlySchedule(cronExpr)}",
+                CronExpression = cronExpr,
+                TaskType = newTask.TaskType,
+                TargetPath = newTask.TargetPath,
+                FileAgeDays = newTask.FileAgeDays,
+                IsEnabled = true
+            };
+            
+            var response = await httpClient.PostAsJsonAsync("api/scheduler/tasks", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                createMessage = "✅ Schedule created!";
+                createAlertClass = "alert-success";
+                newTask = new NewTaskModel();
+                showCustomForm = false;
+                await LoadTasks();
+            }
+            else
+            {
+                createMessage = "❌ Could not create schedule. Please try again.";
+                createAlertClass = "alert-danger";
+            }
+        }
+        catch
+        {
+            createMessage = "❌ Could not create schedule. Please try again.";
+            createAlertClass = "alert-danger";
+        }
+        finally
+        {
+            isCreating = false;
+        }
+    }
+
+    private async Task ToggleTask(string taskId, bool enable)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            var endpoint = enable ? $"api/scheduler/tasks/{taskId}/enable" : $"api/scheduler/tasks/{taskId}/disable";
+            await httpClient.PostAsync(endpoint, null);
+            await LoadTasks();
+        }
+        catch
+        {
+            // Silently fail
+        }
+    }
+
+    private async Task DeleteTask(string taskId)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            await httpClient.DeleteAsync($"api/scheduler/tasks/{taskId}");
+            await LoadTasks();
+        }
+        catch
+        {
+            // Silently fail
+        }
+    }
+
+    private async Task RunTaskNow(string taskId)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            await httpClient.PostAsync($"api/scheduler/run-now/{taskId}", null);
+            await Task.Delay(1000);
+            await LoadTasks();
+            await LoadHistory();
+        }
+        catch
+        {
+            // Silently fail
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    // Models
+    private class NewTaskModel
+    {
+        public string Name { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string CronExpression { get; set; } = "0 2 * * *";
+        public string TaskType { get; set; } = "TempCleanup";
+        public string TargetPath { get; set; } = "";
+        public int FileAgeDays { get; set; } = 30;
+    }
+
+    private record ScheduledTaskDto(
+        string Id,
+        string Name,
+        string? Description,
+        string CronExpression,
+        string TaskType,
+        string? TargetPath,
+        bool IsEnabled,
+        DateTimeOffset? NextRunTime,
+        DateTimeOffset? LastRunTime,
+        bool? LastRunSuccess);
+
+    private record ExecutionHistoryDto(
+        string TaskId,
+        string TaskName,
+        DateTimeOffset ExecutedAt,
+        bool Success,
+        int FilesDeleted,
+        long BytesFreed,
+        string? ErrorMessage);
+}

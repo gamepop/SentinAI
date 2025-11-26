@@ -167,9 +167,14 @@
         <div class="card mb-3 @(brainStatus?.IsModelLoaded == true ? "border-success" : "border-warning")">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">🧠 Brain Status</h5>
-                <button class="btn btn-sm btn-outline-secondary" @onclick="LoadBrainStatusAsync">
-                    <span class="oi oi-reload"></span>
-                </button>
+                <div>
+                    <a href="/brain-memory" class="btn btn-sm btn-outline-info me-2">
+                        <span class="oi oi-lightbulb"></span> View Memory
+                    </a>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="LoadBrainStatusAsync">
+                        <span class="oi oi-reload"></span>
+                    </button>
+                </div>
             </div>
             <div class="card-body">
                 @if (brainStatus == null)

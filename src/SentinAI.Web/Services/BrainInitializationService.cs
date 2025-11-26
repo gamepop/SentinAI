@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using SentinAI.Web.Services;
+using SentinAI.Web.Services.Rag;
 
 namespace SentinAI.Web.Services;
 
@@ -13,17 +13,20 @@ public class BrainInitializationService : BackgroundService
     private readonly IAgentBrain _brain;
     private readonly IModelDownloadService _modelDownloader;
     private readonly IWinapp2Parser _winapp2Parser;
+    private readonly IRagStore _ragStore;
 
     public BrainInitializationService(
         ILogger<BrainInitializationService> logger,
         IAgentBrain brain,
         IModelDownloadService modelDownloader,
-        IWinapp2Parser winapp2Parser)
+        IWinapp2Parser winapp2Parser,
+        IRagStore ragStore)
     {
         _logger = logger;
         _brain = brain;
         _modelDownloader = modelDownloader;
         _winapp2Parser = winapp2Parser;
+        _ragStore = ragStore;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -111,6 +114,20 @@ public class BrainInitializationService : BackgroundService
             var winapp2Duration = sw.ElapsedMilliseconds - winapp2Start;
 
             _logger.LogInformation("✅ Winapp2 rules loaded in {Duration}ms", winapp2Duration);
+
+            if (_ragStore.IsEnabled)
+            {
+                _logger.LogInformation("───────────────────────────────────────────────────────────────");
+                _logger.LogInformation("📚 Initializing RAG store (provider: Weaviate)...");
+                var ragStart = sw.ElapsedMilliseconds;
+                await _ragStore.InitializeAsync(stoppingToken);
+                var ragDuration = sw.ElapsedMilliseconds - ragStart;
+                _logger.LogInformation("✅ RAG store ready in {Duration}ms", ragDuration);
+            }
+            else
+            {
+                _logger.LogInformation("📚 RAG store disabled (set RagStore:Enabled=true to turn it on).");
+            }
 
             sw.Stop();
             _logger.LogInformation("═══════════════════════════════════════════════════════════════");

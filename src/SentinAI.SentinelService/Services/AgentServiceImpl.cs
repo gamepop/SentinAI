@@ -1,8 +1,8 @@
+using System.Linq;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using SentinAI.Shared;
 using SentinAI.Shared.Models;
-using Microsoft.Extensions.Logging;
-using System.Linq;
 
 namespace SentinAI.SentinelService.Services;
 
@@ -94,8 +94,8 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
             Accepted = accepted,
             AnalysisId = analysisId,
             FoldersQueued = foldersQueued,
-            Message = accepted 
-                ? $"Analysis started for {foldersQueued} folder(s)" 
+            Message = accepted
+                ? $"Analysis started for {foldersQueued} folder(s)"
                 : "No files found in specified folders"
         };
     }
@@ -129,7 +129,8 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
                     Category = suggestion.Category,
                     SafeToDelete = suggestion.SafeToDelete,
                     Reason = suggestion.Reason,
-                    AutoApprove = suggestion.AutoApprove
+                    AutoApprove = suggestion.AutoApprove,
+                    Confidence = suggestion.Confidence
                 });
             }
 
@@ -143,7 +144,7 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
     private List<string> GetSystemCleanupFolders()
     {
         var folders = new List<string>();
-        
+
         // Windows Temp
         var windowsTemp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp");
         if (Directory.Exists(windowsTemp)) folders.Add(windowsTemp);
@@ -154,7 +155,7 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
 
         // Browser Caches
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        
+
         var chromeCacheParent = Path.Combine(localAppData, "Google", "Chrome", "User Data");
         if (Directory.Exists(chromeCacheParent))
         {
@@ -216,34 +217,49 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
         // If AnalysisId is provided, use the orchestrator to get file paths from the session
         if (!string.IsNullOrWhiteSpace(request.AnalysisId))
         {
-            _logger.LogInformation("🔄 Using orchestrator to approve analysis {AnalysisId}", request.AnalysisId);
-            
-            // Get the session's suggestions before approval
-            var pendingAnalyses = await _orchestrator.GetPendingAnalysesAsync();
-            var session = pendingAnalyses.FirstOrDefault(s => s.Id == request.AnalysisId);
-            
-            if (session == null)
+            List<string> filePathsToClean;
+            bool isFullSessionCleanup = false;
+
+            // If specific files are requested, use them (Partial Cleanup / Auto-Clean)
+            if (request.FilePaths.Count > 0)
             {
-                _logger.LogWarning("Session {AnalysisId} not found in pending analyses", request.AnalysisId);
-                return new CleanupResult
+                filePathsToClean = request.FilePaths.Distinct().ToList();
+                _logger.LogInformation("🧹 Partial cleanup for session {AnalysisId}: {Count} files",
+                    request.AnalysisId, filePathsToClean.Count);
+            }
+            else
+            {
+                // If no files specified, assume "Approve All" -> get all from session
+                _logger.LogInformation("🔄 Using orchestrator to approve ALL items in analysis {AnalysisId}", request.AnalysisId);
+
+                // Get the session's suggestions before approval
+                var pendingAnalyses = await _orchestrator.GetPendingAnalysesAsync();
+                var session = pendingAnalyses.FirstOrDefault(s => s.Id == request.AnalysisId);
+
+                if (session == null)
                 {
-                    Success = false,
-                    Errors = { $"Analysis session {request.AnalysisId} not found" }
-                };
+                    _logger.LogWarning("Session {AnalysisId} not found in pending analyses", request.AnalysisId);
+                    return new CleanupResult
+                    {
+                        Success = false,
+                        Errors = { $"Analysis session {request.AnalysisId} not found" }
+                    };
+                }
+
+                // Get file paths from session - include ALL suggestions
+                filePathsToClean = session.Suggestions
+                    .Select(s => s.FilePath)
+                    .Distinct()
+                    .ToList();
+
+                isFullSessionCleanup = true;
             }
 
-            // Get file paths from session - include ALL suggestions, not just SafeToDelete
-            // (user has explicitly approved, so trust their decision)
-            var filePaths = session.Suggestions
-                .Select(s => s.FilePath)
-                .Distinct()
-                .ToList();
+            _logger.LogInformation("📁 Found {Count} paths to clean from session: {Paths}",
+                filePathsToClean.Count,
+                string.Join(", ", filePathsToClean));
 
-            _logger.LogInformation("📁 Found {Count} paths to clean from session: {Paths}", 
-                filePaths.Count, 
-                string.Join(", ", filePaths));
-
-            if (filePaths.Count == 0)
+            if (filePathsToClean.Count == 0)
             {
                 return new CleanupResult
                 {
@@ -254,10 +270,19 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
             }
 
             // Execute cleanup with the session's file paths
-            var result = await _cleanupExecutor.ExecuteCleanupAsync(filePaths, context.CancellationToken);
+            var result = await _cleanupExecutor.ExecuteCleanupAsync(filePathsToClean, context.CancellationToken);
 
-            // Now mark the session as complete via orchestrator
-            await _orchestrator.ApproveAnalysisAsync(request.AnalysisId, context.CancellationToken);
+            // Update session state
+            if (isFullSessionCleanup)
+            {
+                // Mark entire session as complete
+                await _orchestrator.ApproveAnalysisAsync(request.AnalysisId, context.CancellationToken);
+            }
+            else if (result.Success)
+            {
+                // Mark only the cleaned items as complete
+                await _orchestrator.CompleteItemsAsync(request.AnalysisId, filePathsToClean, context.CancellationToken);
+            }
 
             return new CleanupResult
             {

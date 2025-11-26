@@ -63,6 +63,8 @@ message AnalysisResponse {
 message CleanupRequest {
   string folder_path = 1;
   repeated string file_names = 2;
+  string session_id = 3;
+  string query_hint = 4;
 }
 
 message CleanupSuggestions {
@@ -78,6 +80,7 @@ message CleanupItem {
   bool safe_to_delete = 4;
   string reason = 5;
   bool auto_approve = 6;
+  double confidence = 7;  // AI confidence score (0.0 - 1.0)
 }
 
 message CleanupCommand {
