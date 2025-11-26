@@ -86,7 +86,7 @@ The application consists of multiple components:
 - **Hybrid approach** - Heuristics validate, RAG retrieves context, AI decides
 - **Structured output** - JSON responses for reliable parsing
 
-### 🔍 RAG Memory System (NEW)
+### 🔍 RAG Memory System
 - **Weaviate Vector Database** - Local vector storage at `localhost:8080`
 - **Ollama Embeddings** - `nomic-embed-text` model at `localhost:11434`
 - **Contextual Recall** - Retrieves similar past decisions to inform new ones
@@ -99,7 +99,7 @@ The application consists of multiple components:
 - Build artifacts (bin/obj) → **Safe**
 - Downloads with documents → **Review Required**
 
-### 🏠 User-Friendly Home Page (NEW)
+### 🏠 User-Friendly Home Page
 - **One-Click Quick Scan** - Simple scanning for novice users
 - **AI Auto Mode** - Automatically cleans high-confidence items using AI + RAG
 - **Individual Item Approval** - Approve or skip each item separately
@@ -114,7 +114,7 @@ The application consists of multiple components:
 - **Category Filtering** - Filter by safe/review status
 - **Execution History** - Track past cleanup operations
 
-### ⏰ Auto Cleanup Scheduler (NEW)
+### ⏰ Auto Cleanup Scheduler
 - **Quick Toggle Cards** - Daily, Weekly, Monthly presets
 - **Friendly Time Picker** - No cron expressions needed
 - **Safe Items Only** - Auto-cleanup only affects pre-approved categories
@@ -350,6 +350,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 - **Issues:** [GitHub Issues](https://github.com/gamepop/SentinAI/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/gamepop/SentinAI/discussions)
+
+**Disclaimer:** This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software. Use at your own risk.
 
 ---
 
