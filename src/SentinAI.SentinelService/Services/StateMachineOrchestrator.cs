@@ -26,6 +26,8 @@ public interface IStateMachineOrchestrator
         List<string> folderPaths,
         string reason,
         CancellationToken cancellationToken);
+
+    Task CompleteItemsAsync(string analysisId, List<string> filePaths, CancellationToken cancellationToken);
 }
 
 public class StateMachineOrchestrator : IStateMachineOrchestrator
@@ -388,6 +390,42 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
         return (true, session.Id, foldersProcessed);
     }
 
+    public async Task CompleteItemsAsync(string analysisId, List<string> filePaths, CancellationToken cancellationToken)
+    {
+        AnalysisSession? session;
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_sessions.TryGetValue(analysisId, out session))
+            {
+                return;
+            }
+
+            var initialCount = session.Suggestions.Count;
+            var removedCount = session.Suggestions.RemoveAll(s => filePaths.Contains(s.FilePath));
+            
+            _logger.LogInformation("Session {SessionId}: Completed {Removed} items, {Remaining} remaining", 
+                analysisId, removedCount, session.Suggestions.Count);
+
+            if (session.Suggestions.Count == 0)
+            {
+                _logger.LogInformation("All items in session {SessionId} completed, closing session", analysisId);
+                session.CurrentState = AgentState.Report;
+                session.CompletedAt = DateTime.UtcNow;
+                _sessions.Remove(analysisId);
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        if (session != null && session.Suggestions.Count == 0)
+        {
+            await PublishActivityAsync(session, "Completed");
+        }
+    }
+
     private async Task ExecuteSessionCleanupAsync(AnalysisSession session, CancellationToken cancellationToken)
     {
         var filePaths = session.Suggestions
@@ -540,7 +578,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
                         SafeToDelete = item.SafeToDelete,
                         Reason = item.Reason,
                         AutoApprove = item.AutoApprove,
-                        Confidence = 0.0
+                        Confidence = double.IsNaN(item.Confidence) ? 0.0 : item.Confidence
                     });
                 }
             }

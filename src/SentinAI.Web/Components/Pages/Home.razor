@@ -3,9 +3,12 @@
 @using System.IO
 @using System.Net.Http.Json
 @using System.Text.Json
+@using SentinAI.Shared.Models
+@using SentinAI.Shared.Services
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
 @inject ILogger<Home> Logger
+@inject IConfigurationManager ConfigManager
 @rendermode InteractiveServer
 
 <PageTitle>SentinAI - Smart Storage Cleanup</PageTitle>
@@ -41,10 +44,10 @@
                                 <span class="visually-hidden">Scanning...</span>
                             </div>
                         </div>
-                        <h3 class="mb-3">Scanning your PC...</h3>
-                        <p class="text-muted mb-4">This usually takes less than a minute</p>
+                        <h3 class="mb-3">@(aiAutoMode ? "🤖 AI Scanning & Cleaning..." : "Scanning your PC...")</h3>
+                        <p class="text-muted mb-4">@(aiAutoMode ? "AI is analyzing and auto-cleaning safe items" : "This usually takes less than a minute")</p>
                         <div class="progress" style="height: 8px;">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                            <div class="progress-bar progress-bar-striped progress-bar-animated @(aiAutoMode ? "bg-info" : "")" 
                                  role="progressbar" style="width: @scanProgress%"></div>
                         </div>
                         <small class="text-muted mt-2 d-block">@scanStatus</small>
@@ -56,6 +59,12 @@
                         </div>
                         <h3 class="mb-2 text-primary">Review Items to Clean</h3>
                         <p class="text-muted mb-3">Found @pendingItems.Count item(s) to review</p>
+                        @if (autoCleanedCount > 0)
+                        {
+                            <div class="alert alert-info mb-3">
+                                <span class="me-2">🤖</span> AI automatically cleaned @autoCleanedCount item(s)
+                            </div>
+                        }
                     }
                     else if (cleanupComplete)
                     {
@@ -63,7 +72,20 @@
                             <span class="display-1">🎊</span>
                         </div>
                         <h3 class="mb-3 text-success">Cleanup Complete!</h3>
-                        <p class="text-muted mb-4">@itemsCleanedCount item(s) cleaned successfully</p>
+                        @if (autoCleanedCount > 0)
+                        {
+                            <p class="text-muted mb-2">
+                                <span class="badge bg-info me-1">🤖 AI</span> @autoCleanedCount item(s) auto-cleaned
+                            </p>
+                        }
+                        @if (itemsCleanedCount > 0)
+                        {
+                            <p class="text-muted mb-4">@itemsCleanedCount item(s) cleaned manually</p>
+                        }
+                        else if (autoCleanedCount == 0)
+                        {
+                            <p class="text-muted mb-4">Your PC is already clean!</p>
+                        }
                         <button class="btn btn-primary btn-lg" @onclick="ScanAgainAsync">
                             Scan Again
                         </button>
@@ -75,8 +97,28 @@
                         </div>
                         <h3 class="mb-3 text-success">Your PC is clean!</h3>
                         <p class="text-muted mb-4">No junk files found. Great job keeping your system tidy!</p>
-                        <button class="btn btn-primary btn-lg px-5" @onclick="StartQuickScanAsync">
-                            <span class="me-2">🚀</span> Quick Scan
+                        
+                        @* AI Auto Mode Toggle *@
+                        <div class="ai-mode-toggle mb-4">
+                            <div class="form-check form-switch d-flex justify-content-center align-items-center gap-2">
+                                <input class="form-check-input" type="checkbox" role="switch" id="aiModeSwitch" 
+                                       @bind="aiAutoMode" style="width: 3rem; height: 1.5rem;">
+                                <label class="form-check-label" for="aiModeSwitch">
+                                    <span class="fw-semibold @(aiAutoMode ? "text-info" : "text-muted")">
+                                        🤖 AI Auto Mode
+                                    </span>
+                                </label>
+                            </div>
+                            <small class="text-muted d-block mt-1">
+                                @(aiAutoMode 
+                                    ? "AI will auto-clean high-confidence items based on RAG learning" 
+                                    : "Manual approval required for all items")
+                            </small>
+                        </div>
+                        
+                        <button class="btn @(aiAutoMode ? "btn-info" : "btn-primary") btn-lg px-5" @onclick="StartQuickScanAsync">
+                            <span class="me-2">@(aiAutoMode ? "🤖" : "🚀")</span> 
+                            @(aiAutoMode ? "AI Smart Scan" : "Quick Scan")
                         </button>
                     }
                 </div>
@@ -334,19 +376,36 @@
     private bool isScanning;
     private bool cleanupComplete;
     private bool isProcessing;
+    private bool aiAutoMode;
     private int scanProgress;
     private string scanStatus = "Initializing...";
     private string? errorMessage;
     private int itemsCleanedCount;
+    private int autoCleanedCount;
     private BrainStatusDto? brainStatus;
     private string? currentAnalysisId;
     private List<PendingItemModel> pendingItems = new();
+    private SentinelConfig? config;
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadConfigAsync();
         await LoadBrainStatusAsync();
         await LoadPendingSuggestionsAsync();
         isLoading = false;
+    }
+
+    private async Task LoadConfigAsync()
+    {
+        try
+        {
+            config = await ConfigManager.LoadConfigAsync();
+            aiAutoMode = config?.AiAutoModeEnabled ?? false;
+        }
+        catch
+        {
+            config = new SentinelConfig();
+        }
     }
 
     private async Task LoadBrainStatusAsync()
@@ -410,8 +469,10 @@
         cleanupComplete = false;
         errorMessage = null;
         scanProgress = 0;
-        scanStatus = "Starting scan...";
+        scanStatus = aiAutoMode ? "AI initializing..." : "Starting scan...";
         pendingItems.Clear();
+        autoCleanedCount = 0;
+        itemsCleanedCount = 0;
         await InvokeAsync(StateHasChanged);
 
         try
@@ -426,7 +487,7 @@
             var response = await httpClient.PostAsJsonAsync("api/agent/analyze", new
             {
                 FullSystemScan = true,
-                Reason = "Quick scan from Home"
+                Reason = aiAutoMode ? "AI Smart Scan from Home" : "Quick scan from Home"
             });
 
             if (!response.IsSuccessStatusCode)
@@ -437,10 +498,26 @@
             var result = await response.Content.ReadFromJsonAsync<AnalyzeResponseDto>();
             currentAnalysisId = result?.AnalysisId;
             
-            Logger.LogInformation("Quick scan started with AnalysisId: {AnalysisId}", currentAnalysisId);
+            Logger.LogInformation("Quick scan started with AnalysisId: {AnalysisId}, AI Mode: {AiMode}", 
+                currentAnalysisId, aiAutoMode);
 
             // Poll for results
             await PollForResultsAsync(httpClient);
+
+            // If AI Auto Mode is enabled and there are items, auto-clean high confidence items
+            if (aiAutoMode)
+            {
+                if (pendingItems.Count > 0)
+                {
+                    await RunAiAutoCleanAsync(httpClient);
+                }
+                else
+                {
+                    // No items found, stop scanning
+                    isScanning = false;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -451,9 +528,115 @@
         }
     }
 
+    private async Task RunAiAutoCleanAsync(HttpClient httpClient)
+    {
+        scanStatus = "🤖 AI analyzing and cleaning...";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var threshold = config?.AiConfidenceThreshold ?? 0.85;
+            var categories = config?.AiAutoCleanCategories ?? new List<string> { "Temp", "Cache", "Logs", "BuildArtifacts" };
+
+            Logger.LogInformation("🤖 Running AI Auto-Clean with threshold={Threshold}, categories={Categories}",
+                threshold, string.Join(",", categories));
+
+            var autoCleanResponse = await httpClient.PostAsJsonAsync("api/agent/auto-clean", new
+            {
+                ConfidenceThreshold = threshold,
+                Categories = categories,
+                AnalysisId = currentAnalysisId
+            });
+
+            if (autoCleanResponse.IsSuccessStatusCode)
+            {
+                var autoCleanResult = await autoCleanResponse.Content.ReadFromJsonAsync<AutoCleanResultDto>();
+                
+                if (autoCleanResult != null)
+                {
+                    autoCleanedCount = autoCleanResult.AutoCleanedCount;
+                    
+                    Logger.LogInformation("🤖 AI Auto-Clean result: {Cleaned} cleaned, {Skipped} skipped",
+                        autoCleanedCount, autoCleanResult.SkippedCount);
+
+                    // Reload pending suggestions from server to get accurate state
+                    await ReloadPendingItemsAsync(httpClient);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "AI Auto-Clean encountered an error, falling back to manual review");
+        }
+
+        // Always stop scanning
+        isScanning = false;
+        scanProgress = 100;
+
+        // Determine final state
+        if (pendingItems.Count == 0)
+        {
+            if (autoCleanedCount > 0)
+            {
+                // AI cleaned everything
+                cleanupComplete = true;
+            }
+            // else: no items found at all - will show "PC is clean"
+        }
+        // else: there are pending items to review - will show review list
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReloadPendingItemsAsync(HttpClient httpClient)
+    {
+        try
+        {
+            var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var response = await httpClient.GetAsync("api/agent/suggestions");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var suggestions = JsonSerializer.Deserialize<PendingSuggestionsDto>(json, jsonOptions);
+                
+                if (suggestions?.Analyses?.Any() == true)
+                {
+                    var analysis = suggestions.Analyses.First();
+                    currentAnalysisId = analysis.AnalysisId;
+                    
+                    pendingItems = analysis.Suggestions?
+                        .Select(s => new PendingItemModel
+                        {
+                            AnalysisId = analysis.AnalysisId,
+                            FilePath = s.FilePath,
+                            SizeBytes = s.SizeBytes,
+                            Category = s.Category,
+                            SafeToDelete = s.SafeToDelete,
+                            Reason = s.Reason
+                        })
+                        .ToList() ?? new();
+                        
+                    Logger.LogInformation("Reloaded {Count} pending items from server", pendingItems.Count);
+                }
+                else
+                {
+                    pendingItems.Clear();
+                    Logger.LogInformation("No pending items after reload");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to reload pending items");
+        }
+    }
+
     private async Task UpdateProgressAsync()
     {
-        var statuses = new[] { "Scanning temp files...", "Checking browser caches...", "Analyzing folders...", "Finishing up..." };
+        var normalStatuses = new[] { "Scanning temp files...", "Checking browser caches...", "Analyzing folders...", "Finishing up..." };
+        var aiStatuses = new[] { "🧠 AI analyzing patterns...", "📚 Consulting RAG memory...", "🔍 Evaluating confidence...", "🤖 Making decisions..." };
+        var statuses = aiAutoMode ? aiStatuses : normalStatuses;
         var index = 0;
 
         while (isScanning && scanProgress < 90)
@@ -468,7 +651,7 @@
 
     private async Task PollForResultsAsync(HttpClient httpClient)
     {
-        var maxAttempts = 30;
+        var maxAttempts = 60; // Increased to 60 seconds for slower AI analysis
         var attempt = 0;
         var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
@@ -490,34 +673,44 @@
 
                 if (suggestions?.Analyses?.Any() == true)
                 {
-                    // Try to find our specific analysis, or fall back to the most recent one
-                    var analysis = suggestions.Analyses.FirstOrDefault(a => a.AnalysisId == currentAnalysisId)
-                                ?? suggestions.Analyses.First();
+                    // Try to find our specific analysis
+                    var analysis = suggestions.Analyses.FirstOrDefault(a => a.AnalysisId == currentAnalysisId);
 
-                    Logger.LogInformation("Found analysis: Id={Id}, Items={Items}", 
-                        analysis.AnalysisId, analysis.Suggestions?.Count ?? 0);
+                    if (analysis != null)
+                    {
+                        Logger.LogInformation("Found analysis: Id={Id}, Items={Items}", 
+                            analysis.AnalysisId, analysis.Suggestions?.Count ?? 0);
 
-                    currentAnalysisId = analysis.AnalysisId;
-                    
-                    // Convert to view model
-                    pendingItems = analysis.Suggestions?
-                        .Select(s => new PendingItemModel
+                        currentAnalysisId = analysis.AnalysisId;
+                        
+                        // Convert to view model
+                        pendingItems = analysis.Suggestions?
+                            .Select(s => new PendingItemModel
+                            {
+                                AnalysisId = analysis.AnalysisId,
+                                FilePath = s.FilePath,
+                                SizeBytes = s.SizeBytes,
+                                Category = s.Category,
+                                SafeToDelete = s.SafeToDelete,
+                                Reason = s.Reason
+                            })
+                            .ToList() ?? new();
+
+                        scanProgress = 100;
+                        
+                        Logger.LogInformation("Scan complete, found {Count} pending items, AI mode: {AiMode}", 
+                            pendingItems.Count, aiAutoMode);
+                        
+                        // Only stop scanning here if NOT in AI mode
+                        // AI mode will stop scanning after auto-clean completes
+                        if (!aiAutoMode)
                         {
-                            AnalysisId = analysis.AnalysisId,
-                            FilePath = s.FilePath,
-                            SizeBytes = s.SizeBytes,
-                            Category = s.Category,
-                            SafeToDelete = s.SafeToDelete,
-                            Reason = s.Reason
-                        })
-                        .ToList() ?? new();
-
-                    scanProgress = 100;
-                    isScanning = false;
-                    
-                    Logger.LogInformation("Scan complete, found {Count} pending items", pendingItems.Count);
-                    await InvokeAsync(StateHasChanged);
-                    return;
+                            isScanning = false;
+                        }
+                        
+                        await InvokeAsync(StateHasChanged);
+                        return;
+                    }
                 }
             }
             catch (Exception ex)
@@ -528,7 +721,8 @@
 
         Logger.LogWarning("Polling timed out after {Attempts} attempts with no results", maxAttempts);
         
-        // Timeout - show no results
+        // Timeout - show error instead of "Clean"
+        errorMessage = "Scan timed out. The analysis is taking longer than expected. Please check back later.";
         pendingItems.Clear();
         scanProgress = 100;
         isScanning = false;
@@ -671,6 +865,7 @@
     {
         cleanupComplete = false;
         itemsCleanedCount = 0;
+        autoCleanedCount = 0;
         pendingItems.Clear();
         currentAnalysisId = null;
         await StartQuickScanAsync();
@@ -759,4 +954,12 @@
     private sealed record CleanupResultDto(
         [property: System.Text.Json.Serialization.JsonPropertyName("filesDeleted")] int FilesDeleted,
         [property: System.Text.Json.Serialization.JsonPropertyName("bytesFreed")] long BytesFreed);
+
+    private sealed record AutoCleanResultDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("success")] bool Success,
+        [property: System.Text.Json.Serialization.JsonPropertyName("autoCleanedCount")] int AutoCleanedCount,
+        [property: System.Text.Json.Serialization.JsonPropertyName("autoCleanedPaths")] List<string>? AutoCleanedPaths,
+        [property: System.Text.Json.Serialization.JsonPropertyName("skippedCount")] int SkippedCount,
+        [property: System.Text.Json.Serialization.JsonPropertyName("bytesFreed")] long BytesFreed,
+        [property: System.Text.Json.Serialization.JsonPropertyName("message")] string? Message);
 }

@@ -141,7 +141,8 @@ public class BrainGrpcService : AgentService.AgentServiceBase
                     Category = suggestion.Category,
                     SafeToDelete = suggestion.SafeToDelete,
                     Reason = suggestion.Reason,
-                    AutoApprove = suggestion.AutoApprove
+                    AutoApprove = suggestion.AutoApprove,
+                    Confidence = suggestion.Confidence  // Map AI confidence score
                 };
 
                 suggestions.Items.Add(item);

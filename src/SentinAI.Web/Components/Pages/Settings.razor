@@ -1,7 +1,7 @@
 @page "/settings"
 @using SentinAI.Shared.Models
 @using SentinAI.Shared.Services
-@inject ConfigurationManager ConfigManager
+@inject IConfigurationManager ConfigManager
 @inject IJSRuntime JS
 @rendermode InteractiveServer
 
@@ -159,6 +159,77 @@
                             Add Folder
                         </button>
                     </div>
+                </div>
+            </div>
+
+            <!-- AI Auto Mode Settings -->
+            <div class="settings-card ai-mode-card">
+                <div class="card-header">
+                    <span class="card-icon">🤖</span>
+                    <div>
+                        <h3>AI Auto Mode</h3>
+                        <p>Let AI automatically clean items based on confidence and RAG learning</p>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="setting-item">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input ai-switch" type="checkbox" role="switch" id="aiAutoModeEnabled" 
+                                   @bind="_config.AiAutoModeEnabled" style="width: 3rem; height: 1.5rem;">
+                            <label class="form-check-label" for="aiAutoModeEnabled">
+                                <span class="setting-label">Enable AI Auto Mode</span>
+                                <span class="setting-hint">When enabled, AI will automatically clean high-confidence items without asking</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    @if (_config.AiAutoModeEnabled)
+                    {
+                        <div class="ai-settings-expanded">
+                            <div class="setting-item">
+                                <label for="aiConfidence">
+                                    <span class="setting-label">Confidence Threshold</span>
+                                    <span class="setting-hint">AI will only auto-clean items with confidence above this level (0.0 - 1.0)</span>
+                                </label>
+                                <div class="d-flex align-items-center gap-3">
+                                    <input type="range" id="aiConfidence" @bind="_config.AiConfidenceThreshold" 
+                                           min="0.5" max="1.0" step="0.05" class="form-range" style="max-width: 200px;" />
+                                    <span class="badge @GetConfidenceBadgeClass(_config.AiConfidenceThreshold) fs-6">
+                                        @(_config.AiConfidenceThreshold.ToString("P0"))
+                                    </span>
+                                </div>
+                                <small class="text-muted">@GetConfidenceDescription(_config.AiConfidenceThreshold)</small>
+                            </div>
+
+                            <div class="setting-item">
+                                <label>
+                                    <span class="setting-label">Auto-Clean Categories</span>
+                                    <span class="setting-hint">AI will only auto-clean items in these categories</span>
+                                </label>
+                                <div class="category-toggles">
+                                    @foreach (var category in _allCategories)
+                                    {
+                                        var isEnabled = _config.AiAutoCleanCategories.Contains(category);
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" id="cat_@category" 
+                                                   checked="@isEnabled"
+                                                   @onchange="e => ToggleCategory(category, (bool)(e.Value ?? false))" />
+                                            <label class="form-check-label" for="cat_@category">@category</label>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+
+                            <div class="alert alert-info mt-3 mb-0">
+                                <strong>💡 How it works:</strong>
+                                <ul class="mb-0 mt-2">
+                                    <li>AI uses RAG memory to learn from your past decisions</li>
+                                    <li>Items below the confidence threshold will still require manual approval</li>
+                                    <li>Only items marked "Safe to Delete" in the selected categories will be auto-cleaned</li>
+                                </ul>
+                            </div>
+                        </div>
+                    }
                 </div>
             </div>
         </div>
@@ -399,6 +470,41 @@
             color: #e0e0e0;
         }
     }
+
+    /* AI Mode Card Styling */
+    .ai-mode-card .card-header {
+        background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+    }
+
+    .ai-switch:checked {
+        background-color: #0dcaf0;
+        border-color: #0dcaf0;
+    }
+
+    .ai-settings-expanded {
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid #e9ecef;
+    }
+
+    .category-toggles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 0.5rem;
+    }
+
+    .category-toggles .form-check {
+        margin: 0;
+    }
+
+    .category-toggles .form-check-label {
+        font-weight: 500;
+    }
+
+    .form-range {
+        cursor: pointer;
+    }
 </style>
 
 @code {
@@ -409,6 +515,7 @@
     private string _newAutoApprovePattern = "";
     private string _newExcludedFolder = "";
     private List<string> _availableDrives = new();
+    private readonly List<string> _allCategories = new() { "Temp", "Cache", "Logs", "BuildArtifacts", "NodeModules", "Downloads" };
 
     protected override async Task OnInitializedAsync()
     {
@@ -446,6 +553,36 @@
         catch
         {
             _availableDrives = new List<string> { "C:\\" };
+        }
+    }
+
+    private string GetConfidenceBadgeClass(double confidence) => confidence switch
+    {
+        >= 0.95 => "bg-danger",      // Very conservative
+        >= 0.85 => "bg-warning text-dark",  // Conservative (default)
+        >= 0.70 => "bg-info",        // Moderate
+        _ => "bg-success"            // Aggressive
+    };
+
+    private string GetConfidenceDescription(double confidence) => confidence switch
+    {
+        >= 0.95 => "🛡️ Very Conservative - Only auto-clean items AI is extremely confident about",
+        >= 0.85 => "⚖️ Conservative (Recommended) - Good balance of safety and automation",
+        >= 0.70 => "⚡ Moderate - More aggressive auto-cleaning, some items may need verification",
+        _ => "🔥 Aggressive - Auto-clean most safe items (use with caution)"
+    };
+
+    private void ToggleCategory(string category, bool enabled)
+    {
+        if (_config == null) return;
+
+        if (enabled && !_config.AiAutoCleanCategories.Contains(category))
+        {
+            _config.AiAutoCleanCategories.Add(category);
+        }
+        else if (!enabled)
+        {
+            _config.AiAutoCleanCategories.Remove(category);
         }
     }
 

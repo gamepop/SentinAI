@@ -80,6 +80,7 @@ message CleanupItem {
   bool safe_to_delete = 4;
   string reason = 5;
   bool auto_approve = 6;
+  double confidence = 7;  // AI confidence score (0.0 - 1.0)
 }
 
 message CleanupCommand {
