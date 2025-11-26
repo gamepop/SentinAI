@@ -724,7 +724,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
         return suggestions;
     }
 
-    private Task PublishActivityAsync(AnalysisSession session, string state, IReadOnlyDictionary<string, string>? metadata = null)
+    private Task PublishActivityAsync(AnalysisSession session, string state, Dictionary<string, string>? metadata = null)
     {
         return _activityPublisher.PublishAsync(new MonitoringActivity
         {

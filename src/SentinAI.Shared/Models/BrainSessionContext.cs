@@ -16,6 +16,20 @@ public class BrainSessionContext
     public string? QueryHint { get; set; }
 
     /// <summary>
+    /// Additional metadata for the session
+    /// </summary>
+    public Dictionary<string, string>? Metadata { get; set; }
+
+    public BrainSessionContext() { }
+
+    public BrainSessionContext(string sessionId, string? queryHint, Dictionary<string, string>? metadata = null)
+    {
+        SessionId = sessionId;
+        QueryHint = queryHint;
+        Metadata = metadata;
+    }
+
+    /// <summary>
     /// Creates a new session context with a random session ID
     /// </summary>
     public static BrainSessionContext Create(string? queryHint = null)

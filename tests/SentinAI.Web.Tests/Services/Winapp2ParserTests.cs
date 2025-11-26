@@ -259,7 +259,7 @@ FileKey1=C:\Third\Path|*.*
     public async Task LoadAsync_StripsEnvironmentVariables()
     {
         // Arrange
-        var tempPath = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
+        var tempPath = Path.GetTempPath();
         var winapp2Content = @"
 [Temp Variable *]
 Section=System

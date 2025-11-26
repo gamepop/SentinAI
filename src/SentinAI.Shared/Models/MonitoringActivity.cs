@@ -82,6 +82,36 @@ public enum MonitoringActivityType
     ServiceStatus,
 
     /// <summary>
+    /// Drive sweep operation
+    /// </summary>
+    DriveSweep,
+
+    /// <summary>
+    /// USN Journal batch processing
+    /// </summary>
+    UsnBatch,
+
+    /// <summary>
+    /// State machine transition
+    /// </summary>
+    StateTransition,
+
+    /// <summary>
+    /// Cleanup analysis operation
+    /// </summary>
+    CleanupAnalysis,
+
+    /// <summary>
+    /// Interaction with the AI model
+    /// </summary>
+    ModelInteraction,
+
+    /// <summary>
+    /// Connection status with the Brain service
+    /// </summary>
+    BrainConnection,
+
+    /// <summary>
     /// Custom activity type
     /// </summary>
     Custom

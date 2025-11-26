@@ -327,7 +327,7 @@ public class DuplicateFileServiceTests : IDisposable
         cts.Cancel();
 
         // Act & Assert
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        await Assert.ThrowsAsync<TaskCanceledException>(() =>
             _service.ScanForDuplicatesAsync(_testDirectory, new DuplicateScanOptions(), cancellationToken: cts.Token));
     }
 
