@@ -117,8 +117,75 @@ public class AgentController : ControllerBase
     [HttpPost("reject/{analysisId}")]
     public async Task<ActionResult> RejectCleanup(string analysisId)
     {
-        _logger.LogInformation("Cleanup analysis {AnalysisId} rejected by user", analysisId);
-        return Ok();
+        try
+        {
+            if (_sentinelClient != null)
+            {
+                // Notify the sentinel service to remove this analysis
+                var command = new CleanupCommand
+                {
+                    AnalysisId = analysisId,
+                    UserApproved = false
+                };
+                await _sentinelClient.ExecuteCleanupAsync(command);
+            }
+            
+            _logger.LogInformation("Cleanup analysis {AnalysisId} rejected by user", analysisId);
+            return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to reject cleanup {AnalysisId}", analysisId);
+            return Ok(new { success = true }); // Still return success - rejection is best effort
+        }
+    }
+
+    /// <summary>
+    /// Clean a specific path (individual item approval)
+    /// </summary>
+    [HttpPost("clean-path")]
+    public async Task<ActionResult> CleanPath([FromBody] CleanPathRequest request)
+    {
+        try
+        {
+            if (_sentinelClient == null)
+            {
+                return BadRequest(new { error = "Sentinel Service not connected" });
+            }
+
+            if (string.IsNullOrEmpty(request.Path))
+            {
+                return BadRequest(new { error = "Path is required" });
+            }
+
+            _logger.LogInformation("Cleaning individual path: {Path}", request.Path);
+
+            var command = new CleanupCommand
+            {
+                AnalysisId = request.AnalysisId ?? Guid.NewGuid().ToString(),
+                UserApproved = true
+            };
+            command.FilePaths.Add(request.Path);
+
+            var result = await _sentinelClient.ExecuteCleanupAsync(command);
+
+            if (result.Success)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    filesDeleted = result.FilesDeleted,
+                    bytesFreed = result.BytesFreed
+                });
+            }
+
+            return BadRequest(new { success = false, errors = result.Errors });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to clean path {Path}", request.Path);
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 
     /// <summary>
@@ -188,4 +255,10 @@ public record AnalyzeRequest
     public List<string>? FolderPaths { get; init; }
     public bool FullSystemScan { get; init; }
     public string? Reason { get; init; }
+}
+
+public record CleanPathRequest
+{
+    public string? Path { get; init; }
+    public string? AnalysisId { get; init; }
 }

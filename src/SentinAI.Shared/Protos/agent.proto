@@ -63,6 +63,8 @@ message AnalysisResponse {
 message CleanupRequest {
   string folder_path = 1;
   repeated string file_names = 2;
+  string session_id = 3;
+  string query_hint = 4;
 }
 
 message CleanupSuggestions {

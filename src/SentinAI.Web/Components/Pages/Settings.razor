@@ -1,0 +1,524 @@
+@page "/settings"
+@using SentinAI.Shared.Models
+@using SentinAI.Shared.Services
+@inject ConfigurationManager ConfigManager
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Settings - SentinAI</PageTitle>
+
+<div class="settings-container">
+    <div class="settings-header">
+        <h1>⚙️ Settings</h1>
+        <p class="subtitle">Configure how SentinAI manages your storage</p>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="loading-state">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Loading settings...</p>
+        </div>
+    }
+    else if (_config != null)
+    {
+        <div class="settings-sections">
+            <!-- General Settings -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <span class="card-icon">📂</span>
+                    <div>
+                        <h3>Storage Monitoring</h3>
+                        <p>Configure which drives and folders to monitor</p>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="setting-item">
+                        <label for="monitoredDrive">
+                            <span class="setting-label">Monitored Drive</span>
+                            <span class="setting-hint">The primary drive to monitor for changes</span>
+                        </label>
+                        <select id="monitoredDrive" @bind="_config.MonitoredDrive" class="form-select">
+                            @foreach (var drive in _availableDrives)
+                            {
+                                <option value="@drive">@drive</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="debounce">
+                            <span class="setting-label">Analysis Delay</span>
+                            <span class="setting-hint">Wait time before analyzing changes (seconds)</span>
+                        </label>
+                        <input type="number" id="debounce" @bind="_config.DebounceSeconds" min="5" max="300" class="form-control" />
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="maxSize">
+                            <span class="setting-label">Max Analysis Size</span>
+                            <span class="setting-hint">Skip folders larger than this (MB)</span>
+                        </label>
+                        <input type="number" id="maxSize" @bind="_config.MaxAnalysisSizeMB" min="100" max="50000" class="form-control" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cleanup Rules -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <span class="card-icon">🧹</span>
+                    <div>
+                        <h3>Cleanup Rules</h3>
+                        <p>Configure automatic cleanup behavior</p>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="setting-item">
+                        <label for="oldFiles">
+                            <span class="setting-label">Old Files Threshold</span>
+                            <span class="setting-hint">Consider files in Downloads older than this as candidates (days)</span>
+                        </label>
+                        <input type="number" id="oldFiles" @bind="_config.OldFileThresholdDays" min="7" max="365" class="form-control" />
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="nodeModules">
+                            <span class="setting-label">node_modules Threshold</span>
+                            <span class="setting-hint">Suggest cleaning node_modules older than this (days)</span>
+                        </label>
+                        <input type="number" id="nodeModules" @bind="_config.NodeModulesThresholdDays" min="7" max="365" class="form-control" />
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="heavyWrite">
+                            <span class="setting-label">Heavy Write Threshold</span>
+                            <span class="setting-hint">Trigger analysis when writes exceed this (MB)</span>
+                        </label>
+                        <input type="number" id="heavyWrite" @bind="_config.HeavyWriteThresholdMB" min="50" max="5000" class="form-control" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Auto-Approve Patterns -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <span class="card-icon">✅</span>
+                    <div>
+                        <h3>Auto-Approve Patterns</h3>
+                        <p>File patterns that will be automatically cleaned without confirmation</p>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="pattern-list">
+                        @foreach (var pattern in _config.AutoApprovePatterns)
+                        {
+                            <div class="pattern-item">
+                                <code>@pattern</code>
+                                <button class="btn-remove" @onclick="() => RemoveAutoApprovePattern(pattern)" title="Remove">
+                                    ✕
+                                </button>
+                            </div>
+                        }
+                    </div>
+                    <div class="add-pattern">
+                        <input type="text" @bind="_newAutoApprovePattern" placeholder="e.g., *.bak" class="form-control" />
+                        <button class="btn btn-outline-primary" @onclick="AddAutoApprovePattern" disabled="@string.IsNullOrWhiteSpace(_newAutoApprovePattern)">
+                            Add Pattern
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Excluded Folders -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <span class="card-icon">🚫</span>
+                    <div>
+                        <h3>Excluded Folders</h3>
+                        <p>Folders that will never be analyzed or cleaned</p>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="pattern-list">
+                        @foreach (var folder in _config.ExcludedFolders)
+                        {
+                            <div class="pattern-item">
+                                <code>@folder</code>
+                                <button class="btn-remove" @onclick="() => RemoveExcludedFolder(folder)" title="Remove">
+                                    ✕
+                                </button>
+                            </div>
+                        }
+                    </div>
+                    <div class="add-pattern">
+                        <input type="text" @bind="_newExcludedFolder" placeholder="e.g., Games" class="form-control" />
+                        <button class="btn btn-outline-primary" @onclick="AddExcludedFolder" disabled="@string.IsNullOrWhiteSpace(_newExcludedFolder)">
+                            Add Folder
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Save Button -->
+        <div class="settings-actions">
+            <button class="btn btn-secondary" @onclick="ResetToDefaults">
+                🔄 Reset to Defaults
+            </button>
+            <button class="btn btn-primary btn-lg" @onclick="SaveSettings" disabled="@_isSaving">
+                @if (_isSaving)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    <span>Saving...</span>
+                }
+                else
+                {
+                    <span>💾 Save Settings</span>
+                }
+            </button>
+        </div>
+
+        @if (_showSaveSuccess)
+        {
+            <div class="alert alert-success save-alert">
+                ✅ Settings saved successfully!
+            </div>
+        }
+    }
+    else
+    {
+        <div class="alert alert-warning">
+            <strong>⚠️ Unable to load settings.</strong>
+            <p>Please make sure the SentinAI service is running.</p>
+        </div>
+    }
+</div>
+
+<style>
+    .settings-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+
+    .settings-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+
+    .settings-header h1 {
+        font-size: 2rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+
+    .settings-header .subtitle {
+        color: #6c757d;
+        font-size: 1.1rem;
+    }
+
+    .loading-state {
+        text-align: center;
+        padding: 3rem;
+    }
+
+    .loading-state p {
+        margin-top: 1rem;
+        color: #6c757d;
+    }
+
+    .settings-sections {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .settings-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        overflow: hidden;
+    }
+
+    .settings-card .card-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1.25rem 1.5rem;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .settings-card .card-icon {
+        font-size: 1.75rem;
+    }
+
+    .settings-card .card-header h3 {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+
+    .settings-card .card-header p {
+        margin: 0.25rem 0 0 0;
+        font-size: 0.875rem;
+        color: #6c757d;
+    }
+
+    .settings-card .card-body {
+        padding: 1.5rem;
+    }
+
+    .setting-item {
+        margin-bottom: 1.25rem;
+    }
+
+    .setting-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .setting-item label {
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+
+    .setting-label {
+        display: block;
+        font-weight: 500;
+        color: #212529;
+    }
+
+    .setting-hint {
+        display: block;
+        font-size: 0.8rem;
+        color: #6c757d;
+        margin-top: 0.125rem;
+    }
+
+    .setting-item .form-control,
+    .setting-item .form-select {
+        max-width: 300px;
+    }
+
+    .pattern-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .pattern-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        padding: 0.375rem 0.5rem 0.375rem 0.75rem;
+    }
+
+    .pattern-item code {
+        font-size: 0.875rem;
+        color: #495057;
+    }
+
+    .btn-remove {
+        background: none;
+        border: none;
+        color: #dc3545;
+        cursor: pointer;
+        padding: 0.125rem 0.375rem;
+        font-size: 0.875rem;
+        border-radius: 4px;
+        line-height: 1;
+    }
+
+    .btn-remove:hover {
+        background: #fee;
+    }
+
+    .add-pattern {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    .add-pattern .form-control {
+        flex: 1;
+        max-width: 300px;
+    }
+
+    .settings-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid #e9ecef;
+    }
+
+    .save-alert {
+        margin-top: 1rem;
+        animation: fadeIn 0.3s ease-out;
+    }
+
+    @@keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Dark mode support */
+    @@media (prefers-color-scheme: dark) {
+        .settings-card {
+            background: #1e1e1e;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        .settings-card .card-header {
+            background: #252525;
+            border-bottom-color: #333;
+        }
+
+        .settings-card .card-header h3 {
+            color: #fff;
+        }
+
+        .setting-label {
+            color: #e0e0e0;
+        }
+
+        .pattern-item {
+            background: #2d2d2d;
+            border-color: #444;
+        }
+
+        .pattern-item code {
+            color: #e0e0e0;
+        }
+    }
+</style>
+
+@code {
+    private SentinelConfig? _config;
+    private bool _isLoading = true;
+    private bool _isSaving;
+    private bool _showSaveSuccess;
+    private string _newAutoApprovePattern = "";
+    private string _newExcludedFolder = "";
+    private List<string> _availableDrives = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSettings();
+        LoadAvailableDrives();
+    }
+
+    private async Task LoadSettings()
+    {
+        try
+        {
+            _isLoading = true;
+            _config = await ConfigManager.LoadConfigAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading settings: {ex.Message}");
+            _config = new SentinelConfig();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void LoadAvailableDrives()
+    {
+        try
+        {
+            _availableDrives = DriveInfo.GetDrives()
+                .Where(d => d.IsReady && d.DriveType == DriveType.Fixed)
+                .Select(d => d.Name)
+                .ToList();
+        }
+        catch
+        {
+            _availableDrives = new List<string> { "C:\\" };
+        }
+    }
+
+    private async Task SaveSettings()
+    {
+        if (_config == null) return;
+
+        _isSaving = true;
+        _showSaveSuccess = false;
+
+        try
+        {
+            await ConfigManager.SaveConfigAsync(_config);
+            _showSaveSuccess = true;
+            
+            // Auto-hide success message after 3 seconds
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+                await InvokeAsync(() =>
+                {
+                    _showSaveSuccess = false;
+                    StateHasChanged();
+                });
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving settings: {ex.Message}");
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private void AddAutoApprovePattern()
+    {
+        if (_config == null || string.IsNullOrWhiteSpace(_newAutoApprovePattern)) return;
+        
+        var pattern = _newAutoApprovePattern.Trim();
+        if (!_config.AutoApprovePatterns.Contains(pattern))
+        {
+            _config.AutoApprovePatterns.Add(pattern);
+        }
+        _newAutoApprovePattern = "";
+    }
+
+    private void RemoveAutoApprovePattern(string pattern)
+    {
+        _config?.AutoApprovePatterns.Remove(pattern);
+    }
+
+    private void AddExcludedFolder()
+    {
+        if (_config == null || string.IsNullOrWhiteSpace(_newExcludedFolder)) return;
+        
+        var folder = _newExcludedFolder.Trim();
+        if (!_config.ExcludedFolders.Contains(folder))
+        {
+            _config.ExcludedFolders.Add(folder);
+        }
+        _newExcludedFolder = "";
+    }
+
+    private void RemoveExcludedFolder(string folder)
+    {
+        _config?.ExcludedFolders.Remove(folder);
+    }
+
+    private async Task ResetToDefaults()
+    {
+        _config = new SentinelConfig();
+        await InvokeAsync(StateHasChanged);
+    }
+}

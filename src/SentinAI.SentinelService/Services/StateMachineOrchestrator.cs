@@ -1,11 +1,11 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using SentinAI.Shared;
 using SentinAI.Shared.Models;
 using SentinAI.Shared.Services;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 
 namespace SentinAI.SentinelService.Services;
 
@@ -18,12 +18,12 @@ public interface IStateMachineOrchestrator
     Task<List<AnalysisSession>> GetPendingAnalysesAsync();
     Task ApproveAnalysisAsync(string analysisId, CancellationToken cancellationToken);
     Task RejectAnalysisAsync(string analysisId);
-    
+
     /// <summary>
     /// Trigger on-demand analysis of specific folders
     /// </summary>
     Task<(bool Accepted, string AnalysisId, int FoldersQueued)> AnalyzeNowAsync(
-        List<string> folderPaths, 
+        List<string> folderPaths,
         string reason,
         CancellationToken cancellationToken);
 }
@@ -85,7 +85,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
 
         try
         {
-            suggestions = await AnalyzeWithBrainAsync(session.TriggerEvents, cancellationToken);
+            suggestions = await AnalyzeWithBrainAsync(session, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -276,7 +276,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
         string reason,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("🔍 Analyze Now triggered: {Count} folders, Reason: {Reason}", 
+        _logger.LogInformation("🔍 Analyze Now triggered: {Count} folders, Reason: {Reason}",
             folderPaths.Count, reason);
 
         await _activityPublisher.PublishAsync(new MonitoringActivity
@@ -309,7 +309,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
             {
                 // Get files in the folder (non-recursive for performance)
                 var files = Directory.GetFiles(folderPath, "*", SearchOption.TopDirectoryOnly);
-                
+
                 _logger.LogInformation("📂 Scanning folder: {Folder} ({Count} files)", folderPath, files.Length);
 
                 foreach (var file in files.Take(100)) // Limit to 100 files per folder
@@ -425,9 +425,10 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
     }
 
     private async Task<List<CleanupSuggestion>> AnalyzeWithBrainAsync(
-        List<FileEvent> events,
+        AnalysisSession session,
         CancellationToken cancellationToken)
     {
+        var events = session.TriggerEvents;
         if (_brainClient == null)
         {
             _logger.LogWarning("\u26a0\ufe0f Brain client not configured; using heuristic fallback");
@@ -458,7 +459,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
 
         var groupCount = 0;
         var totalGroups = groups.Count();
-        
+
         foreach (var group in groups)
         {
             groupCount++;
@@ -466,7 +467,12 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
                 ? Path.GetDirectoryName(group.First().FilePath) ?? "C:\\"
                 : group.Key;
 
-            var request = new CleanupRequest { FolderPath = folder };
+            var request = new CleanupRequest
+            {
+                FolderPath = folder,
+                SessionId = session.Id,
+                QueryHint = session.Scope ?? string.Empty
+            };
 
             foreach (var fileEvent in group)
             {
@@ -486,7 +492,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
             {
                 _logger.LogInformation("\ud83d\udce4 [{Current}/{Total}] Sending to Brain: {Folder} ({FileCount} files)",
                     groupCount, totalGroups, folder, request.FileNames.Count);
-                
+
                 await _activityPublisher.PublishAsync(new MonitoringActivity
                 {
                     Type = MonitoringActivityType.ModelInteraction,
@@ -505,7 +511,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
 
                 _logger.LogInformation("\ud83d\udce5 Brain returned {Count} suggestions for {Folder}",
                     response.Items.Count, folder);
-                
+
                 await _activityPublisher.PublishAsync(new MonitoringActivity
                 {
                     Type = MonitoringActivityType.ModelInteraction,
@@ -525,7 +531,7 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
                 {
                     _logger.LogDebug("  \u2022 {File}: SafeToDelete={Safe}, Category={Category}, Reason={Reason}",
                         item.FilePath, item.SafeToDelete, item.Category, item.Reason);
-                    
+
                     suggestions.Add(new CleanupSuggestion
                     {
                         FilePath = item.FilePath,

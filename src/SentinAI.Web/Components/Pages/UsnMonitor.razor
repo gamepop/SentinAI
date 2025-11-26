@@ -1,0 +1,475 @@
+@page "/usn-monitor"
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.SignalR.Client
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+@rendermode InteractiveServer
+
+<PageTitle>USN Monitor - SentinAI</PageTitle>
+
+<h1>📡 Real-Time File Monitor</h1>
+<p class="text-muted">Monitor file system changes in real-time using the NTFS USN Journal.</p>
+
+@* Monitor Controls *@
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Monitor Status</h5>
+        <span class="badge @GetStatusBadgeClass()">@GetStatusText()</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">Drive to Monitor</label>
+                <select class="form-select" @bind="selectedDrive" disabled="@isMonitoring">
+                    <option value="">Select a drive...</option>
+                    @foreach (var drive in availableDrives)
+                    {
+                        <option value="@drive">@drive</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Filter</label>
+                <input type="text" class="form-control" @bind="filterText" @bind:event="oninput" placeholder="Filter by filename..." />
+            </div>
+            <div class="col-md-4">
+                <div class="btn-group w-100">
+                    @if (!isMonitoring)
+                    {
+                        <button class="btn btn-success" @onclick="StartMonitoring" 
+                                disabled="@(string.IsNullOrWhiteSpace(selectedDrive) || isStarting)">
+                            @if (isStarting)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            <span class="oi oi-media-play me-1"></span>
+                            Start Monitoring
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-danger" @onclick="StopMonitoring">
+                            <span class="oi oi-media-stop me-1"></span>
+                            Stop Monitoring
+                        </button>
+                    }
+                    <button class="btn btn-outline-secondary" @onclick="ClearEvents">
+                        <span class="oi oi-trash me-1"></span>
+                        Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        @if (!string.IsNullOrWhiteSpace(statusMessage))
+        {
+            <div class="alert @statusAlertClass mt-3 mb-0">@statusMessage</div>
+        }
+        
+        @if (stats != null)
+        {
+            <div class="row mt-3">
+                <div class="col-md-3">
+                    <div class="border rounded p-2 text-center">
+                        <small class="text-muted">Events Received</small>
+                        <h4 class="mb-0">@stats.EventsReceived.ToString("N0")</h4>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="border rounded p-2 text-center">
+                        <small class="text-muted">Files Created</small>
+                        <h4 class="mb-0 text-success">@stats.FilesCreated.ToString("N0")</h4>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="border rounded p-2 text-center">
+                        <small class="text-muted">Files Modified</small>
+                        <h4 class="mb-0 text-warning">@stats.FilesModified.ToString("N0")</h4>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="border rounded p-2 text-center">
+                        <small class="text-muted">Files Deleted</small>
+                        <h4 class="mb-0 text-danger">@stats.FilesDeleted.ToString("N0")</h4>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@* Event Type Filters *@
+<div class="card mb-4">
+    <div class="card-header">
+        <h6 class="mb-0">Event Type Filters</h6>
+    </div>
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-3">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="showCreated" id="showCreated">
+                <label class="form-check-label" for="showCreated">
+                    <span class="badge bg-success">Created</span>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="showModified" id="showModified">
+                <label class="form-check-label" for="showModified">
+                    <span class="badge bg-warning text-dark">Modified</span>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="showDeleted" id="showDeleted">
+                <label class="form-check-label" for="showDeleted">
+                    <span class="badge bg-danger">Deleted</span>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="showRenamed" id="showRenamed">
+                <label class="form-check-label" for="showRenamed">
+                    <span class="badge bg-info">Renamed</span>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="showDirectories" id="showDirectories">
+                <label class="form-check-label" for="showDirectories">
+                    <span class="badge bg-secondary">Directories</span>
+                </label>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Live Event Stream *@
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            Live Events 
+            @if (isMonitoring)
+            {
+                <span class="badge bg-success pulse ms-2">● Live</span>
+            }
+        </h5>
+        <small class="text-muted">Showing @FilteredEvents.Count() of @events.Count events</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="sticky-top bg-light">
+                    <tr>
+                        <th style="width: 140px;">Time</th>
+                        <th style="width: 100px;">Event</th>
+                        <th>File Path</th>
+                        <th style="width: 100px;">Size</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var evt in FilteredEvents.Take(500))
+                    {
+                        <tr>
+                            <td>
+                                <small class="text-muted">@evt.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff")</small>
+                            </td>
+                            <td>
+                                <span class="badge @GetEventBadgeClass(evt.PrimaryReason)">@evt.PrimaryReason</span>
+                                @if (evt.IsDirectory)
+                                {
+                                    <span class="badge bg-secondary ms-1">DIR</span>
+                                }
+                            </td>
+                            <td>
+                                <code class="small text-truncate d-inline-block" style="max-width: 600px;" title="@evt.FullPath">
+                                    @evt.FullPath
+                                </code>
+                            </td>
+                            <td>
+                                @if (evt.FileSize > 0 && !evt.IsDirectory)
+                                {
+                                    <small>@FormatBytes(evt.FileSize)</small>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            
+            @if (!events.Any())
+            {
+                <div class="text-center py-5 text-muted">
+                    <span class="oi oi-pulse" style="font-size: 3rem;"></span>
+                    <p class="mt-2">
+                        @if (isMonitoring)
+                        {
+                            <span>Waiting for file system events...</span>
+                        }
+                        else
+                        {
+                            <span>Start monitoring to see real-time file changes.</span>
+                        }
+                    </p>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .pulse {
+        animation: pulse 2s infinite;
+    }
+    @@keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+</style>
+
+@code {
+    private List<string> availableDrives = new();
+    private string? selectedDrive;
+    private string? filterText;
+    
+    private bool isMonitoring;
+    private bool isStarting;
+    private string? statusMessage;
+    private string statusAlertClass = "alert-info";
+    
+    private MonitoringStats? stats;
+    private List<UsnEventDto> events = new();
+    private const int MaxEvents = 1000;
+    
+    // Filters
+    private bool showCreated = true;
+    private bool showModified = true;
+    private bool showDeleted = true;
+    private bool showRenamed = true;
+    private bool showDirectories = false;
+    
+#pragma warning disable CS0649 // Field is never assigned - hubConnection is planned for future SignalR implementation
+    private HubConnection? hubConnection;
+#pragma warning restore CS0649
+    private System.Threading.Timer? refreshTimer;
+
+    private IEnumerable<UsnEventDto> FilteredEvents => events
+        .Where(e => 
+            (showCreated && e.PrimaryReason == "Created") ||
+            (showModified && e.PrimaryReason == "Modified") ||
+            (showDeleted && e.PrimaryReason == "Deleted") ||
+            (showRenamed && e.PrimaryReason == "Renamed") ||
+            (e.PrimaryReason != "Created" && e.PrimaryReason != "Modified" && e.PrimaryReason != "Deleted" && e.PrimaryReason != "Renamed"))
+        .Where(e => showDirectories || !e.IsDirectory)
+        .Where(e => string.IsNullOrWhiteSpace(filterText) || 
+                    (e.FullPath?.Contains(filterText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (e.FileName?.Contains(filterText, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Get available drives
+        availableDrives = DriveInfo.GetDrives()
+            .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
+            .Select(d => d.Name.TrimEnd('\\'))
+            .ToList();
+        
+        if (availableDrives.Any())
+        {
+            selectedDrive = availableDrives.First();
+        }
+        
+        await LoadStatus();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        refreshTimer?.Dispose();
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    private async Task LoadStatus()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            var response = await httpClient.GetFromJsonAsync<MonitoringStatusDto>("api/usnmonitor/status");
+            if (response != null)
+            {
+                isMonitoring = response.IsMonitoring;
+                stats = response.Stats;
+            }
+        }
+        catch
+        {
+            // Silently fail
+        }
+    }
+
+    private async Task StartMonitoring()
+    {
+        if (string.IsNullOrWhiteSpace(selectedDrive)) return;
+        
+        isStarting = true;
+        statusMessage = null;
+        
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            var response = await httpClient.PostAsJsonAsync("api/usnmonitor/start", new { DrivePath = selectedDrive });
+            
+            if (response.IsSuccessStatusCode)
+            {
+                isMonitoring = true;
+                statusMessage = $"✅ Monitoring started on {selectedDrive}";
+                statusAlertClass = "alert-success";
+                
+                // Start SSE stream for events
+                await StartEventStream();
+                
+                // Start periodic stats refresh
+                refreshTimer = new System.Threading.Timer(async _ =>
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await LoadStatus();
+                        StateHasChanged();
+                    });
+                }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                statusMessage = $"❌ Failed to start: {error}";
+                statusAlertClass = "alert-danger";
+            }
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"❌ Failed to start: {ex.Message}";
+            statusAlertClass = "alert-danger";
+        }
+        finally
+        {
+            isStarting = false;
+        }
+    }
+
+    private async Task StartEventStream()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            httpClient.Timeout = Timeout.InfiniteTimeSpan;
+            
+            // Use SSE endpoint
+            using var response = await httpClient.GetAsync("api/usnmonitor/stream", HttpCompletionOption.ResponseHeadersRead);
+            using var stream = await response.Content.ReadAsStreamAsync();
+            using var reader = new StreamReader(stream);
+            
+            while (!reader.EndOfStream && isMonitoring)
+            {
+                var line = await reader.ReadLineAsync();
+                if (line?.StartsWith("data: ") == true)
+                {
+                    var json = line[6..];
+                    try
+                    {
+                        var evt = System.Text.Json.JsonSerializer.Deserialize<UsnEventDto>(json);
+                        if (evt != null)
+                        {
+                            await InvokeAsync(() =>
+                            {
+                                events.Insert(0, evt);
+                                if (events.Count > MaxEvents)
+                                {
+                                    events.RemoveRange(MaxEvents, events.Count - MaxEvents);
+                                }
+                                StateHasChanged();
+                            });
+                        }
+                    }
+                    catch
+                    {
+                        // Skip malformed events
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            await InvokeAsync(() =>
+            {
+                statusMessage = $"Stream disconnected: {ex.Message}";
+                statusAlertClass = "alert-warning";
+                StateHasChanged();
+            });
+        }
+    }
+
+    private async Task StopMonitoring()
+    {
+        try
+        {
+            refreshTimer?.Dispose();
+            refreshTimer = null;
+            
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            await httpClient.PostAsync("api/usnmonitor/stop", null);
+            isMonitoring = false;
+            statusMessage = "Monitoring stopped";
+            statusAlertClass = "alert-info";
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"❌ Failed to stop: {ex.Message}";
+            statusAlertClass = "alert-danger";
+        }
+    }
+
+    private void ClearEvents()
+    {
+        events.Clear();
+    }
+
+    private string GetStatusText() => isMonitoring ? "Monitoring" : "Stopped";
+    
+    private string GetStatusBadgeClass() => isMonitoring ? "bg-success" : "bg-secondary";
+
+    private static string GetEventBadgeClass(string primaryReason) => primaryReason switch
+    {
+        "Created" => "bg-success",
+        "Deleted" => "bg-danger",
+        "Modified" => "bg-warning text-dark",
+        "Renamed" => "bg-info",
+        "Closed" => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    // DTOs
+    private record MonitoringStatusDto(bool IsMonitoring, string? Drive, MonitoringStats? Stats);
+    private record MonitoringStats(long EventsReceived, int FilesCreated, int FilesModified, int FilesDeleted);
+    private record UsnEventDto(
+        long Usn,
+        string? FileName,
+        string? FullPath,
+        string Reason,
+        string PrimaryReason,
+        long FileSize,
+        DateTimeOffset Timestamp,
+        bool IsDirectory);
+}
