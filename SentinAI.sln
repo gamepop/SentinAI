@@ -9,23 +9,59 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinAI.Web", "src\SentinA
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinAI.Shared", "src\SentinAI.Shared\SentinAI.Shared.csproj", "{C1234567-89AB-CDEF-0123-456789ABCDEF}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{E1234567-89AB-CDEF-0123-456789ABCDEF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinAI.Shared.Tests", "tests\SentinAI.Shared.Tests\SentinAI.Shared.Tests.csproj", "{F1234567-89AB-CDEF-0123-456789ABCDEF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinAI.Web.Tests", "tests\SentinAI.Web.Tests\SentinAI.Web.Tests.csproj", "{B1234567-89AB-CDEF-0123-456789ABCDEF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
 		Release|x64 = Release|x64
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|x64
 		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|x64
 		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|x64
 		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|x64
+		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{A1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.ActiveCfg = Release|x64
 		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|x64
 		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|x64
 		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|x64
 		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|x64
+		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{D1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.ActiveCfg = Release|x64
 		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|x64
 		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|x64
 		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|x64
 		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|x64
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|x64.Build.0 = Debug|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.ActiveCfg = Release|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Release|x64.Build.0 = Release|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1234567-89AB-CDEF-0123-456789ABCDEF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F1234567-89AB-CDEF-0123-456789ABCDEF} = {E1234567-89AB-CDEF-0123-456789ABCDEF}
+		{B1234567-89AB-CDEF-0123-456789ABCDEF} = {E1234567-89AB-CDEF-0123-456789ABCDEF}
 	EndGlobalSection
 EndGlobal

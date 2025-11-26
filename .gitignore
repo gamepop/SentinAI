@@ -78,7 +78,11 @@ _pkginfo.txt
 
 ## AI Model files (downloaded on-demand)
 *.onnx
-Models/
+*.onnx.data
+# Only ignore Models in publish/output directories, not source code
+[Pp]ublish/**/Models/
+**/bin/**/Models/
+**/obj/**/Models/
 
 ## Local data
 *.db
