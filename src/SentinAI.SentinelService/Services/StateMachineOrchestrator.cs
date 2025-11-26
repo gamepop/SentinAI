@@ -403,8 +403,8 @@ public class StateMachineOrchestrator : IStateMachineOrchestrator
 
             var initialCount = session.Suggestions.Count;
             var removedCount = session.Suggestions.RemoveAll(s => filePaths.Contains(s.FilePath));
-            
-            _logger.LogInformation("Session {SessionId}: Completed {Removed} items, {Remaining} remaining", 
+
+            _logger.LogInformation("Session {SessionId}: Completed {Removed} items, {Remaining} remaining",
                 analysisId, removedCount, session.Suggestions.Count);
 
             if (session.Suggestions.Count == 0)

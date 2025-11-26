@@ -224,7 +224,7 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
             if (request.FilePaths.Count > 0)
             {
                 filePathsToClean = request.FilePaths.Distinct().ToList();
-                _logger.LogInformation("🧹 Partial cleanup for session {AnalysisId}: {Count} files", 
+                _logger.LogInformation("🧹 Partial cleanup for session {AnalysisId}: {Count} files",
                     request.AnalysisId, filePathsToClean.Count);
             }
             else
@@ -251,7 +251,7 @@ public class AgentServiceImpl : AgentService.AgentServiceBase
                     .Select(s => s.FilePath)
                     .Distinct()
                     .ToList();
-                
+
                 isFullSessionCleanup = true;
             }
 
