@@ -101,6 +101,7 @@ The application consists of multiple components:
 
 ### 🏠 User-Friendly Home Page (NEW)
 - **One-Click Quick Scan** - Simple scanning for novice users
+- **AI Auto Mode** - Automatically cleans high-confidence items using AI + RAG
 - **Individual Item Approval** - Approve or skip each item separately
 - **Bulk Actions** - Approve All / Dismiss All for multiple items
 - **Real-time Progress** - Visual feedback during scanning
@@ -109,6 +110,7 @@ The application consists of multiple components:
 ### 📊 Advanced Dashboard
 - **Detailed Analysis** - Full breakdown of all suggestions
 - **AI Reasoning** - See why each item was flagged
+- **Confidence Scores** - View AI confidence levels for each decision
 - **Category Filtering** - Filter by safe/review status
 - **Execution History** - Track past cleanup operations
 
@@ -116,6 +118,7 @@ The application consists of multiple components:
 - **Quick Toggle Cards** - Daily, Weekly, Monthly presets
 - **Friendly Time Picker** - No cron expressions needed
 - **Safe Items Only** - Auto-cleanup only affects pre-approved categories
+- **AI Confidence Thresholds** - Configure minimum confidence for auto-cleaning
 - **Notification Options** - Get notified before/after cleanup
 
 ### 🔗 Winapp2 Integration
@@ -277,6 +280,7 @@ Models are stored in:
 | `/api/agent/approve/{id}` | POST | Approve and execute cleanup |
 | `/api/agent/reject/{id}` | POST | Reject/dismiss suggestions |
 | `/api/agent/clean-path` | POST | Clean a specific path |
+| `/api/agent/auto-clean` | POST | Trigger AI auto-cleanup based on confidence |
 | `/api/agent/analyze` | POST | Trigger full system scan |
 | `/api/scheduler/status` | GET | Get scheduler configuration |
 | `/api/scheduler/configure` | POST | Update scheduler settings |
@@ -319,6 +323,7 @@ Enable detailed AI logs in `appsettings.json`:
 - [x] Web dashboard
 - [x] RAG memory system (Weaviate + Ollama)
 - [x] User-friendly Home page with one-click scan
+- [x] AI Auto Mode with confidence thresholds
 - [x] Individual item approval/rejection
 - [x] Auto cleanup scheduler
 - [x] Settings page
