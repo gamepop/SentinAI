@@ -27,6 +27,25 @@
                             <p class="card-text text-muted small">
                                 Clean temp files and caches every day at 2 AM
                             </p>
+                            
+                            @* AI Decision Mode Toggle *@
+                            <div class="approval-mode-toggle mb-3">
+                                <div class="btn-group btn-group-sm w-100" role="group">
+                                    <input type="radio" class="btn-check" name="daily-mode" id="daily-ai" 
+                                           checked="@(GetApprovalMode("daily") == "ai")"
+                                           @onchange='() => SetApprovalMode("daily", "ai")'>
+                                    <label class="btn btn-outline-primary" for="daily-ai" title="AI will automatically delete files it deems safe">
+                                        🤖 AI Decides
+                                    </label>
+                                    <input type="radio" class="btn-check" name="daily-mode" id="daily-review"
+                                           checked="@(GetApprovalMode("daily") == "review")"
+                                           @onchange='() => SetApprovalMode("daily", "review")'>
+                                    <label class="btn btn-outline-primary" for="daily-review" title="Review AI findings before deletion">
+                                        👁️ Review First
+                                    </label>
+                                </div>
+                            </div>
+                            
                             <div class="schedule-status mt-3">
                                 @if (HasSchedule("daily"))
                                 {
@@ -57,6 +76,25 @@
                             <p class="card-text text-muted small">
                                 Thorough cleanup every Sunday at 3 AM
                             </p>
+                            
+                            @* AI Decision Mode Toggle *@
+                            <div class="approval-mode-toggle mb-3">
+                                <div class="btn-group btn-group-sm w-100" role="group">
+                                    <input type="radio" class="btn-check" name="weekly-mode" id="weekly-ai" 
+                                           checked="@(GetApprovalMode("weekly") == "ai")"
+                                           @onchange='() => SetApprovalMode("weekly", "ai")'>
+                                    <label class="btn btn-outline-primary" for="weekly-ai" title="AI will automatically delete files it deems safe">
+                                        🤖 AI Decides
+                                    </label>
+                                    <input type="radio" class="btn-check" name="weekly-mode" id="weekly-review"
+                                           checked="@(GetApprovalMode("weekly") == "review")"
+                                           @onchange='() => SetApprovalMode("weekly", "review")'>
+                                    <label class="btn btn-outline-primary" for="weekly-review" title="Review AI findings before deletion">
+                                        👁️ Review First
+                                    </label>
+                                </div>
+                            </div>
+                            
                             <div class="schedule-status mt-3">
                                 @if (HasSchedule("weekly"))
                                 {
@@ -87,6 +125,25 @@
                             <p class="card-text text-muted small">
                                 Clean old downloads on the 1st of each month
                             </p>
+                            
+                            @* AI Decision Mode Toggle *@
+                            <div class="approval-mode-toggle mb-3">
+                                <div class="btn-group btn-group-sm w-100" role="group">
+                                    <input type="radio" class="btn-check" name="monthly-mode" id="monthly-ai" 
+                                           checked="@(GetApprovalMode("monthly") == "ai")"
+                                           @onchange='() => SetApprovalMode("monthly", "ai")'>
+                                    <label class="btn btn-outline-primary" for="monthly-ai" title="AI will automatically delete files it deems safe">
+                                        🤖 AI Decides
+                                    </label>
+                                    <input type="radio" class="btn-check" name="monthly-mode" id="monthly-review"
+                                           checked="@(GetApprovalMode("monthly") == "review")"
+                                           @onchange='() => SetApprovalMode("monthly", "review")'>
+                                    <label class="btn btn-outline-primary" for="monthly-review" title="Review AI findings before deletion">
+                                        👁️ Review First
+                                    </label>
+                                </div>
+                            </div>
+                            
                             <div class="schedule-status mt-3">
                                 @if (HasSchedule("monthly"))
                                 {
@@ -177,6 +234,35 @@
                                     </select>
                                 </div>
                             }
+                            
+                            @* AI Decision Mode *@
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">How should AI handle cleanup?</label>
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <div class="form-check card p-3 @(newTask.ApprovalMode == "ai" ? "border-primary" : "")">
+                                            <input class="form-check-input" type="radio" name="approval-mode" id="custom-ai-mode"
+                                                   checked="@(newTask.ApprovalMode == "ai")"
+                                                   @onchange='() => newTask.ApprovalMode = "ai"'>
+                                            <label class="form-check-label" for="custom-ai-mode">
+                                                <span class="fw-semibold">🤖 Let AI Decide</span>
+                                                <br><small class="text-muted">AI automatically deletes files it confidently identifies as safe to remove</small>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-check card p-3 @(newTask.ApprovalMode == "review" ? "border-primary" : "")">
+                                            <input class="form-check-input" type="radio" name="approval-mode" id="custom-review-mode"
+                                                   checked="@(newTask.ApprovalMode == "review")"
+                                                   @onchange='() => newTask.ApprovalMode = "review"'>
+                                            <label class="form-check-label" for="custom-review-mode">
+                                                <span class="fw-semibold">👁️ Review Findings First</span>
+                                                <br><small class="text-muted">AI analyzes files and presents a report for your approval before any deletion</small>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         
                         <div class="mt-4">
@@ -232,14 +318,14 @@
                             {
                                 <div class="list-group-item px-0 py-3 d-flex justify-content-between align-items-center">
                                     <div class="d-flex align-items-center">
-                                        <span class="task-type-icon me-3">@GetTaskTypeEmoji(task.TaskType)</span>
+                                        <span class="task-type-icon me-3">@GetTaskTypeEmojiFromInt(task.TaskType)</span>
                                         <div>
                                             <div class="fw-semibold">@task.Name</div>
                                             <small class="text-muted">
                                                 @GetFriendlySchedule(task.CronExpression)
-                                                @if (task.NextRunTime.HasValue)
+                                                @if (task.NextRunAt.HasValue)
                                                 {
-                                                    <span class="ms-2">• Next: @task.NextRunTime.Value.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                                    <span class="ms-2">• Next: @task.NextRunAt.Value.ToLocalTime().ToString("MMM d, h:mm tt")</span>
                                                 }
                                             </small>
                                         </div>
@@ -378,6 +464,14 @@
     .dropdown-toggle::after {
         display: none;
     }
+    
+    .approval-mode-toggle .btn-group {
+        font-size: 0.75rem;
+    }
+    
+    .approval-mode-toggle .btn {
+        padding: 0.25rem 0.5rem;
+    }
 </style>
 
 @code {
@@ -394,16 +488,32 @@
     private bool isLoadingTasks = true;
     
     private List<ExecutionHistoryDto>? executionHistory;
+    
+    // Approval mode settings for quick schedules (stored locally until task is enabled)
+    private Dictionary<string, string> approvalModes = new()
+    {
+        { "daily", "ai" },
+        { "weekly", "ai" },
+        { "monthly", "review" } // Default monthly to review since it involves user downloads
+    };
 
-    // Quick schedule identifiers
-    private const string DailyScheduleName = "[Auto] Daily Cleanup";
-    private const string WeeklyScheduleName = "[Auto] Weekly Deep Clean";
-    private const string MonthlyScheduleName = "[Auto] Monthly Downloads Cleanup";
+    // Quick schedule identifiers - match backend default task IDs
+    private const string DailyScheduleId = "daily-temp-cleanup";
+    private const string WeeklyScheduleId = "weekly-duplicate-scan";
+    private const string MonthlyScheduleId = "monthly-downloads-cleanup";
 
     protected override async Task OnInitializedAsync()
     {
         await LoadTasks();
         await LoadHistory();
+    }
+    
+    private string GetApprovalMode(string type) => approvalModes.GetValueOrDefault(type, "ai");
+    
+    private void SetApprovalMode(string type, string mode)
+    {
+        approvalModes[type] = mode;
+        StateHasChanged();
     }
 
     private bool HasSchedule(string type)
@@ -411,43 +521,34 @@
         if (tasks == null) return false;
         return type switch
         {
-            "daily" => tasks.Any(t => t.Name == DailyScheduleName),
-            "weekly" => tasks.Any(t => t.Name == WeeklyScheduleName),
-            "monthly" => tasks.Any(t => t.Name == MonthlyScheduleName),
+            "daily" => tasks.Any(t => t.Id == DailyScheduleId && t.IsEnabled),
+            "weekly" => tasks.Any(t => t.Id == WeeklyScheduleId && t.IsEnabled),
+            "monthly" => tasks.Any(t => t.Id == MonthlyScheduleId && t.IsEnabled),
             _ => false
         };
     }
 
     private async Task AddQuickSchedule(string type)
     {
-        var (name, cron, taskType, description) = type switch
+        var taskId = type switch
         {
-            "daily" => (DailyScheduleName, "0 2 * * *", "TempCleanup", "Cleans temp files and caches daily at 2 AM"),
-            "weekly" => (WeeklyScheduleName, "0 3 * * 0", "BrowserCache", "Deep cleans browser cache every Sunday at 3 AM"),
-            "monthly" => (MonthlyScheduleName, "0 4 1 * *", "DownloadsCleanup", "Cleans old downloads on the 1st of each month"),
-            _ => ("", "", "", "")
+            "daily" => DailyScheduleId,
+            "weekly" => WeeklyScheduleId,
+            "monthly" => MonthlyScheduleId,
+            _ => ""
         };
 
-        if (string.IsNullOrEmpty(name)) return;
+        if (string.IsNullOrEmpty(taskId)) return;
 
         try
         {
             var httpClient = HttpClientFactory.CreateClient();
             httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
             
-            var request = new
-            {
-                Name = name,
-                Description = description,
-                CronExpression = cron,
-                TaskType = taskType,
-                TargetPath = "",
-                FileAgeDays = 30,
-                IsEnabled = true
-            };
-            
-            await httpClient.PostAsJsonAsync("api/scheduler/tasks", request);
+            // Enable the existing default task
+            await httpClient.PostAsync($"api/scheduler/tasks/{taskId}/enable", null);
             await LoadTasks();
+            StateHasChanged();
         }
         catch
         {
@@ -457,20 +558,29 @@
 
     private async Task RemoveQuickSchedule(string type)
     {
-        if (tasks == null) return;
-        
-        var name = type switch
+        var taskId = type switch
         {
-            "daily" => DailyScheduleName,
-            "weekly" => WeeklyScheduleName,
-            "monthly" => MonthlyScheduleName,
+            "daily" => DailyScheduleId,
+            "weekly" => WeeklyScheduleId,
+            "monthly" => MonthlyScheduleId,
             _ => ""
         };
 
-        var task = tasks.FirstOrDefault(t => t.Name == name);
-        if (task != null)
+        if (string.IsNullOrEmpty(taskId)) return;
+
+        try
         {
-            await DeleteTask(task.Id);
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            // Disable the task instead of deleting it
+            await httpClient.PostAsync($"api/scheduler/tasks/{taskId}/disable", null);
+            await LoadTasks();
+            StateHasChanged();
+        }
+        catch
+        {
+            // Silently fail
         }
     }
 
@@ -504,6 +614,16 @@
         "RecycleBin" => "🗄️",
         "DuplicateScan" => "📂",
         "CustomFolder" => "📁",
+        _ => "📋"
+    };
+
+    // Maps ScheduledTaskType enum values to emojis
+    // 0 = Cleanup, 1 = DuplicateScan, 2 = FullSystemScan
+    private string GetTaskTypeEmojiFromInt(int taskType) => taskType switch
+    {
+        0 => "🗑️", // Cleanup
+        1 => "📂", // DuplicateScan
+        2 => "🔍", // FullSystemScan
         _ => "📋"
     };
 
@@ -684,19 +804,22 @@
         public string TaskType { get; set; } = "TempCleanup";
         public string TargetPath { get; set; } = "";
         public int FileAgeDays { get; set; } = 30;
+        public string ApprovalMode { get; set; } = "ai"; // "ai" or "review"
     }
 
-    private record ScheduledTaskDto(
-        string Id,
-        string Name,
-        string? Description,
-        string CronExpression,
-        string TaskType,
-        string? TargetPath,
-        bool IsEnabled,
-        DateTimeOffset? NextRunTime,
-        DateTimeOffset? LastRunTime,
-        bool? LastRunSuccess);
+    // DTO matching the backend ScheduledTask JSON serialization
+    private class ScheduledTaskDto
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string CronExpression { get; set; } = "";
+        public int TaskType { get; set; }
+        public bool IsEnabled { get; set; }
+        public DateTime? NextRunAt { get; set; }
+        public DateTime? LastRunAt { get; set; }
+        public int LastStatus { get; set; }
+    }
 
     private record ExecutionHistoryDto(
         string TaskId,

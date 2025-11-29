@@ -87,3 +87,14 @@ _pkginfo.txt
 ## Local data
 *.db
 *.sqlite
+Building_SentinAI_Medium_Article.md
+images/ai-reasoning.png
+images/dashboard-overview.png
+images/monitoring-stats.png
+test-duplicates/unique1.txt
+test-duplicates/unique2.txt
+test-duplicates/folder1/file1.txt
+test-duplicates/folder1/group2.txt
+test-duplicates/folder2/file1_copy.txt
+test-duplicates/folder2/group2_copy.txt
+test-duplicates/folder3/another_copy.txt

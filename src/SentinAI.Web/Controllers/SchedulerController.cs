@@ -92,6 +92,32 @@ public class SchedulerController : ControllerBase
     }
 
     /// <summary>
+    /// Enable a scheduled task
+    /// </summary>
+    [HttpPost("tasks/{taskId}/enable")]
+    public async Task<ActionResult> EnableTask(string taskId)
+    {
+        var success = await _schedulerService.SetTaskEnabledAsync(taskId, true);
+        if (!success)
+            return NotFound(new { error = "Task not found" });
+
+        return Ok(new { message = "Task enabled" });
+    }
+
+    /// <summary>
+    /// Disable a scheduled task
+    /// </summary>
+    [HttpPost("tasks/{taskId}/disable")]
+    public async Task<ActionResult> DisableTask(string taskId)
+    {
+        var success = await _schedulerService.SetTaskEnabledAsync(taskId, false);
+        if (!success)
+            return NotFound(new { error = "Task not found" });
+
+        return Ok(new { message = "Task disabled" });
+    }
+
+    /// <summary>
     /// Get task execution history
     /// </summary>
     [HttpGet("tasks/{taskId}/history")]
@@ -134,6 +160,76 @@ public class SchedulerController : ControllerBase
             });
         }
     }
+
+    #region Pending Review Endpoints
+
+    /// <summary>
+    /// Get all pending cleanup items awaiting user review
+    /// </summary>
+    [HttpGet("pending")]
+    public async Task<ActionResult<List<PendingCleanupItem>>> GetPendingItems([FromQuery] string? taskId = null)
+    {
+        var items = await _schedulerService.GetPendingReviewItemsAsync(taskId);
+        return Ok(items);
+    }
+
+    /// <summary>
+    /// Get a cleanup report by history ID
+    /// </summary>
+    [HttpGet("reports/{historyId}")]
+    public async Task<ActionResult<CleanupReport>> GetCleanupReport(string historyId)
+    {
+        var report = await _schedulerService.GetCleanupReportAsync(historyId);
+        if (report == null)
+            return NotFound(new { error = "Report not found" });
+        return Ok(report);
+    }
+
+    /// <summary>
+    /// Approve a pending item (deletes the file)
+    /// </summary>
+    [HttpPost("pending/{itemId}/approve")]
+    public async Task<ActionResult> ApproveItem(string itemId)
+    {
+        var success = await _schedulerService.ApproveItemAsync(itemId);
+        if (!success)
+            return NotFound(new { error = "Item not found or already processed" });
+        return Ok(new { message = "Item approved and deleted" });
+    }
+
+    /// <summary>
+    /// Reject a pending item (keeps the file)
+    /// </summary>
+    [HttpPost("pending/{itemId}/reject")]
+    public async Task<ActionResult> RejectItem(string itemId)
+    {
+        var success = await _schedulerService.RejectItemAsync(itemId);
+        if (!success)
+            return NotFound(new { error = "Item not found or already processed" });
+        return Ok(new { message = "Item rejected, file kept" });
+    }
+
+    /// <summary>
+    /// Approve all pending items for a task
+    /// </summary>
+    [HttpPost("pending/approve-all")]
+    public async Task<ActionResult> ApproveAll([FromQuery] string taskId)
+    {
+        var count = await _schedulerService.ApproveAllPendingAsync(taskId);
+        return Ok(new { message = $"Approved and deleted {count} items" });
+    }
+
+    /// <summary>
+    /// Reject all pending items for a task
+    /// </summary>
+    [HttpPost("pending/reject-all")]
+    public async Task<ActionResult> RejectAll([FromQuery] string taskId)
+    {
+        var count = await _schedulerService.RejectAllPendingAsync(taskId);
+        return Ok(new { message = $"Rejected {count} items, files kept" });
+    }
+
+    #endregion
 }
 
 public class CronValidationRequest
