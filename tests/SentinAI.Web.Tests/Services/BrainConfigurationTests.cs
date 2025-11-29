@@ -15,7 +15,7 @@ public class BrainConfigurationTests
         Assert.Equal(string.Empty, config.ModelPath);
         Assert.False(config.ForceModelRedownload);
         Assert.Equal(30, config.InferenceTimeoutSeconds);
-        Assert.Equal(2048, config.MaxSequenceLength);
+        Assert.Equal(4096, config.MaxSequenceLength);
         Assert.Equal(150, config.MaxOutputTokens);
         Assert.Equal(0.1, config.Temperature);
     }
@@ -95,7 +95,7 @@ public class BrainConfigurationTests
         var subdir = config.GetModelSubdirectory();
 
         // Assert
-        Assert.Equal("directml/directml-int4-awq-block-128", subdir);
+        Assert.Equal("gpu/gpu-int4-rtn-block-32", subdir);
     }
 
     [Fact]
@@ -108,8 +108,8 @@ public class BrainConfigurationTests
         var (onnxFile, onnxDataFile) = config.GetModelFileNames();
 
         // Assert
-        Assert.Equal("phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx", onnxFile);
-        Assert.Equal("phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx.data", onnxDataFile);
+        Assert.Equal("model.onnx", onnxFile);
+        Assert.Equal("model.onnx.data", onnxDataFile);
     }
 
     [Fact]

@@ -16,12 +16,12 @@ public interface IModelDownloadService
 }
 
 /// <summary>
-/// Handles on-demand downloading of the Phi-3 ONNX model
+/// Handles on-demand downloading of the Phi-4 Mini ONNX model
 /// Downloads from HuggingFace - supports both CPU and DirectML variants
 /// </summary>
 public class ModelDownloadService : IModelDownloadService
 {
-    private const string MODEL_REPO = "microsoft/Phi-3-mini-4k-instruct-onnx";
+    private const string MODEL_REPO = "microsoft/Phi-4-mini-instruct-onnx";
 
     // These are set dynamically based on execution provider
     private readonly string[] _modelFiles;
@@ -62,7 +62,7 @@ public class ModelDownloadService : IModelDownloadService
 
         // Store model in LocalApplicationData with provider-specific subfolder
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var providerFolder = _config.UseCpu ? "Phi3-Mini-CPU" : "Phi3-Mini-DirectML";
+        var providerFolder = _config.UseCpu ? "Phi4-Mini-CPU" : "Phi4-Mini-DirectML";
 
         _localModelPath = !string.IsNullOrEmpty(_config.ModelPath)
             ? _config.ModelPath
@@ -121,7 +121,7 @@ public class ModelDownloadService : IModelDownloadService
 
         if (cacheReady && !effectiveForce)
         {
-            _logger.LogInformation("✅ Phi-3 model ({Provider}) already cached at {Path}.", _config.GetProviderDisplayName(), targetPath);
+            _logger.LogInformation("✅ Phi-4 Mini model ({Provider}) already cached at {Path}.", _config.GetProviderDisplayName(), targetPath);
             return;
         }
 
@@ -241,7 +241,7 @@ public class ModelDownloadService : IModelDownloadService
         try
         {
             Directory.Delete(targetPath, true);
-            _logger.LogInformation("Deleted legacy Phi-3 cache at {Path}.", targetPath);
+            _logger.LogInformation("Deleted legacy model cache at {Path}.", targetPath);
         }
         catch (Exception ex)
         {

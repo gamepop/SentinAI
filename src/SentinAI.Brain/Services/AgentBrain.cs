@@ -33,7 +33,7 @@ public class ModelInteractionEventArgs : EventArgs
 }
 
 /// <summary>
-/// The "Mind" - Runs Phi-3 Mini model for intelligent file analysis
+/// The "Mind" - Runs Phi-4 Mini model for intelligent file analysis
 /// Uses ONNX Runtime GenAI with DirectML for GPU/NPU acceleration
 /// </summary>
 public class AgentBrain : IAgentBrain, IDisposable

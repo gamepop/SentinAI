@@ -36,12 +36,12 @@ public interface IAgentBrain
 }
 
 /// <summary>
-/// Hybrid AI Brain: Heuristics provide context, Phi-3 model makes final decisions
+/// Hybrid AI Brain: Heuristics provide context, Phi-4 Mini model makes final decisions
 /// 
 /// Flow:
 /// 1. Heuristic analysis runs first (fast, rule-based)
 /// 2. Heuristic results become context for AI model
-/// 3. AI model (Phi-3) makes final SafeToDelete decision
+/// 3. AI model (Phi-4 Mini) makes final SafeToDelete decision
 /// 4. Falls back to heuristics-only if model unavailable
 /// </summary>
 public class AgentBrain : IAgentBrain, IDisposable
@@ -114,7 +114,7 @@ public class AgentBrain : IAgentBrain, IDisposable
             }
 
             // Load the ONNX model
-            _logger.LogInformation("📦 Loading Phi-3 ONNX model ({Provider})...", _config.GetProviderDisplayName());
+            _logger.LogInformation("📦 Loading Phi-4 Mini ONNX model ({Provider})...", _config.GetProviderDisplayName());
             _logger.LogInformation("📂 Model files: {Files}", string.Join(", ", Directory.GetFiles(modelPath).Select(Path.GetFileName)));
 
             await _modelLock.WaitAsync();
@@ -131,7 +131,7 @@ public class AgentBrain : IAgentBrain, IDisposable
                 _logger.LogInformation("✅ Tokenizer created in {Duration}ms", modelLoadSw.ElapsedMilliseconds);
 
                 _isModelLoaded = true;
-                _logger.LogInformation("✅ Phi-3 model loaded successfully! AI decisions enabled. Total load time: {Duration}ms", modelLoadSw.ElapsedMilliseconds);
+                _logger.LogInformation("✅ Phi-4 Mini model loaded successfully! AI decisions enabled. Total load time: {Duration}ms", modelLoadSw.ElapsedMilliseconds);
             }
             catch (Exception modelEx)
             {
@@ -159,7 +159,7 @@ public class AgentBrain : IAgentBrain, IDisposable
         catch (Exception ex)
         {
             sw.Stop();
-            _logger.LogError(ex, "❌ Failed to load Phi-3 model. Falling back to heuristic-only mode.");
+            _logger.LogError(ex, "❌ Failed to load Phi-4 Mini model. Falling back to heuristic-only mode.");
             _isInitialized = true;
             _isModelLoaded = false;
             return await Task.FromResult(true); // Still usable in heuristic mode
@@ -200,7 +200,7 @@ public class AgentBrain : IAgentBrain, IDisposable
 
         if (_isModelLoaded && _model != null && _tokenizer != null)
         {
-            _logger.LogInformation("🤖 [Step 2/2] Phi-3 AI making final decision (heuristics as context)...");
+            _logger.LogInformation("🤖 [Step 2/2] Phi-4 Mini AI making final decision (heuristics as context)...");
 
             try
             {

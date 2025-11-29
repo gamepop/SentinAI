@@ -218,7 +218,7 @@
                     {
                         <div class="alert alert-warning mt-3 mb-0">
                             <strong>⚠️ Model downloaded but not loaded!</strong> 
-                            The Phi-3 model files exist but failed to load. Check the console logs for errors.
+                            The Phi-4 Mini model files exist but failed to load. Check the console logs for errors.
                             Try clicking "Force Model Re-download" below to reload.
                         </div>
                     }
@@ -226,7 +226,7 @@
                     {
                         <div class="alert alert-info mt-3 mb-0">
                             <strong>ℹ️ Model not downloaded.</strong> 
-                            Click "Force Model Re-download" below to download the Phi-3 model (~2.5GB).
+                            Click "Force Model Re-download" below to download the Phi-4 Mini model (~2.5GB).
                         </div>
                     }
                 }
@@ -388,7 +388,7 @@
                 <h5 class="mb-0">Model Operations</h5>
             </div>
             <div class="card-body">
-                <p class="text-muted mb-3">Need to pull the latest Phi-3 checkpoint? Trigger a fresh download and Brain re-initialization without touching the command line.</p>
+                <p class="text-muted mb-3">Need to pull the latest Phi-4 Mini checkpoint? Trigger a fresh download and Brain re-initialization without touching the command line.</p>
                 @if (!string.IsNullOrWhiteSpace(modelRefreshMessage))
                 {
                     <div class="alert @modelRefreshAlertClass" role="alert">

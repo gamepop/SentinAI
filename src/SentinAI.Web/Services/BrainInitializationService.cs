@@ -53,7 +53,7 @@ public class BrainInitializationService : BackgroundService
 
             if (!modelExists)
             {
-                _logger.LogInformation("⬇️ Downloading Phi-3 model ({Provider})... (this may take a while)", executionProvider);
+                _logger.LogInformation("⬇️ Downloading Phi-4 Mini model ({Provider})... (this may take a while)", executionProvider);
                 var downloadStart = sw.ElapsedMilliseconds;
 
                 try
@@ -69,7 +69,7 @@ public class BrainInitializationService : BackgroundService
             }
             else
             {
-                _logger.LogInformation("✅ Phi-3 model ({Provider}) already cached at {Path}", executionProvider, modelPath);
+                _logger.LogInformation("✅ Phi-4 Mini model ({Provider}) already cached at {Path}", executionProvider, modelPath);
 
                 // List model files
                 if (Directory.Exists(modelPath))

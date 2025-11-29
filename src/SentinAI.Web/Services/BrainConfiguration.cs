@@ -31,9 +31,9 @@ public class BrainConfiguration
 
     /// <summary>
     /// Maximum total sequence length (input tokens + output tokens)
-    /// Phi-3 Mini supports up to 4096 tokens context window
+    /// Phi-4 Mini supports up to 128k tokens context window
     /// </summary>
-    public int MaxSequenceLength { get; set; } = 2048;
+    public int MaxSequenceLength { get; set; } = 4096;
 
     /// <summary>
     /// Maximum tokens to generate in the output response
@@ -63,19 +63,16 @@ public class BrainConfiguration
     public string GetModelSubdirectory()
     {
         return UseDirectML
-            ? "directml/directml-int4-awq-block-128"  // GPU/DirectML version
+            ? "gpu/gpu-int4-rtn-block-32"  // GPU/DirectML version
             : "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4";  // CPU version
     }
 
     /// <summary>
-    /// Gets the model ONNX file names (different for CPU vs DirectML)
+    /// Gets the model ONNX file names (same for CPU and DirectML in Phi-4)
     /// </summary>
     public (string OnnxFile, string OnnxDataFile) GetModelFileNames()
     {
-        return UseDirectML
-            ? ("model.onnx", "model.onnx.data")
-            : ("phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx",
-               "phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx.data");
+        return ("model.onnx", "model.onnx.data");
     }
 
     /// <summary>

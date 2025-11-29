@@ -6,7 +6,7 @@ This document describes the architecture and design decisions of SentinAI.
 
 SentinAI uses a **hybrid AI + heuristics architecture** where:
 1. **Heuristics** provide fast, rule-based context
-2. **AI (Phi-3 Mini)** makes the final safety decision
+2. **AI (Phi-4 Mini)** makes the final safety decision
 
 This approach combines the speed of rules with the intelligence of AI.
 
@@ -78,7 +78,7 @@ This approach combines the speed of rules with the intelligence of AI.
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │              STEP 2: AI Decision                         │
-│                  (5-15s on CPU)                          │
+│                  (3-10s on CPU)                          │
 │  ┌────────────────────────────────────────────────────┐  │
 │  │ • Receives heuristic context                       │  │
 │  │ • Analyzes path semantics                          │  │
@@ -97,11 +97,10 @@ This approach combines the speed of rules with the intelligence of AI.
 └──────────────────────────────────────────────────────────┘
 ```
 
-## AI Model: Phi-3 Mini
+## AI Model: Phi-4 Mini
 
-### Why Phi-3?
-- **Small size:** ~2.5GB quantized (vs 8GB+ for larger models)
-- **Fast inference:** Works on CPU and GPU
+### Why Phi-4?\n- **Compact size:** ~2.5GB quantized - runs on consumer hardware\n- **Better reasoning:** Significantly improved logic and math capabilities", "oldString": "### Why Phi-4?\n- **Same size:** ~2.5GB quantized (same as Phi-3 Mini)\n- **Better reasoning:** Significantly improved logic and math capabilities
+- **Fast inference:** Works on CPU and GPU (DirectML)
 - **MIT License:** Commercial use allowed
 - **Microsoft optimized:** ONNX Runtime GenAI support
 
@@ -110,7 +109,7 @@ This approach combines the speed of rules with the intelligence of AI.
 | Variant | Provider | Package | Use Case |
 |---------|----------|---------|----------|
 | CPU INT4 | CPU | `Microsoft.ML.OnnxRuntimeGenAI` | Universal compatibility |
-| DirectML INT4 | GPU | `Microsoft.ML.OnnxRuntimeGenAI.DirectML` | Fast inference |
+| GPU INT4 | GPU | `Microsoft.ML.OnnxRuntimeGenAI.DirectML` | Fast inference |
 
 ### Configuration
 
@@ -118,7 +117,7 @@ This approach combines the speed of rules with the intelligence of AI.
 {
   "Brain": {
     "ExecutionProvider": "CPU",      // or "DirectML"
-    "MaxSequenceLength": 2048,       // Total context window
+    "MaxSequenceLength": 4096,       // Total context window
     "MaxOutputTokens": 150,          // Response length limit
     "InferenceTimeoutSeconds": 60,
     "Temperature": 0.1               // Low = deterministic
@@ -193,9 +192,9 @@ string[] AlwaysExclude = {
 ### Inference Times (Typical)
 
 | Hardware | Time per Folder |
-|----------|-----------------|
-| Modern CPU (i7/Ryzen 7) | 5-10 seconds |
-| GPU (RTX 3060+) | 1-3 seconds |
+|----------|----------------|
+| Modern CPU (i7/Ryzen 7) | 3-8 seconds |
+| GPU (RTX 3060+) | 1-2 seconds |
 | NPU (Copilot+ PC) | <1 second |
 
 ### Memory Usage

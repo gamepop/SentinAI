@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Downloads Phi-3 Mini ONNX models for SentinAI Brain
+    Downloads Phi-4 Mini ONNX models for SentinAI Brain
 
 .DESCRIPTION
     This script downloads both CPU and DirectML (GPU) variants of the 
-    Phi-3 Mini 4K Instruct ONNX model from HuggingFace.
+    Phi-4 Mini Instruct ONNX model from HuggingFace.
 
 .PARAMETER Provider
     Which model to download: "CPU", "DirectML", or "Both" (default)
@@ -35,7 +35,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$HuggingFaceRepo = "microsoft/Phi-3-mini-4k-instruct-onnx"
+$HuggingFaceRepo = "microsoft/Phi-4-mini-instruct-onnx"
 $BaseUrl = "https://huggingface.co/$HuggingFaceRepo/resolve/main"
 
 $ModelsDir = Join-Path $env:LOCALAPPDATA "SentinAI\Models"
@@ -44,13 +44,13 @@ $ModelsDir = Join-Path $env:LOCALAPPDATA "SentinAI\Models"
 $Models = @{
     "CPU" = @{
         Subdirectory = "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4"
-        LocalFolder = "Phi3-Mini-CPU"
-        ModelFile = "phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx"
-        DataFile = "phi3-mini-4k-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx.data"
+        LocalFolder = "Phi4-Mini-CPU"
+        ModelFile = "model.onnx"
+        DataFile = "model.onnx.data"
     }
     "DirectML" = @{
-        Subdirectory = "directml/directml-int4-awq-block-128"
-        LocalFolder = "Phi3-Mini-DirectML"
+        Subdirectory = "gpu/gpu-int4-rtn-block-32"
+        LocalFolder = "Phi4-Mini-DirectML"
         ModelFile = "model.onnx"
         DataFile = "model.onnx.data"
     }
@@ -199,7 +199,7 @@ function Download-Model {
 }
 
 # Main script
-Write-Header "SentinAI Phi-3 Model Downloader"
+Write-Header "SentinAI Phi-4 Mini Model Downloader"
 Write-Host "  Models Directory: $ModelsDir" -ForegroundColor Gray
 Write-Host "  Provider: $Provider" -ForegroundColor Gray
 Write-Host "  Force: $Force" -ForegroundColor Gray

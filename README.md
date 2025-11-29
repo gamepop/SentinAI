@@ -1,6 +1,6 @@
 # SentinAI - Autonomous Windows Storage Agent
 
-**SentinAI** is an autonomous agent for Windows that intelligently manages your storage using a **hybrid AI + RAG + heuristics approach**. It combines fast rule-based analysis with Phi-3 Mini AI and Weaviate vector memory for making safe, context-aware cleanup decisions.
+**SentinAI** is an autonomous agent for Windows that intelligently manages your storage using a **hybrid AI + RAG + heuristics approach**. It combines fast rule-based analysis with Phi-4 Mini AI and Weaviate vector memory for making safe, context-aware cleanup decisions.
 
 ## 🎯 Core Philosophy
 
@@ -18,7 +18,7 @@ The application consists of multiple components:
 |-----------|-----------|----------------|
 | **Web Dashboard** | Blazor Server (.NET 8) | User interface, Brain hosting, API |
 | **Sentinel Service** | .NET 8 Worker Service | Monitors USN Journal, executes cleanup |
-| **Brain (Hybrid AI)** | ONNX Runtime GenAI + Phi-3 Mini | Analyzes folders, makes safety decisions |
+| **Brain (Hybrid AI)** | ONNX Runtime GenAI + Phi-4 Mini | Analyzes folders, makes safety decisions |
 | **RAG Memory** | Weaviate + Ollama (nomic-embed-text) | Vector storage for past decisions |
 | **Shared Library** | .NET 8 Class Library | Models, Protos, shared services |
 
@@ -35,7 +35,7 @@ The application consists of multiple components:
    ├── Query similar past decisions from vector store
    └── Include relevant memories in AI prompt
 
-3. AI DECISION (Phi-3 Mini)
+3. AI DECISION (Phi-4 Mini)
    ├── Receives heuristic context + RAG memories
    ├── Analyzes folder + files with historical context
    └── Makes FINAL safe/unsafe decision
@@ -63,7 +63,7 @@ The application consists of multiple components:
 ┌─────────────────────────────────────────────────────────────────┐
 │                      AgentBrain Service                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │ Heuristics  │  │   Phi-3     │  │    RAG Memory Store     │  │
+│  │ Heuristics  │  │  Phi-4     │  │    RAG Memory Store     │  │
 │  │   Engine    │──│  ONNX AI    │──│  (Weaviate + Ollama)    │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -81,7 +81,7 @@ The application consists of multiple components:
 ## 🚀 Features
 
 ### 🧠 Brain Analysis Engine
-- **Phi-3 Mini 4K Instruct** - Microsoft's compact yet capable LLM (~2.5GB)
+- **Phi-4 Mini Instruct** - Microsoft's powerful compact LLM with enhanced reasoning (~2.5GB)
 - **CPU or DirectML (GPU)** - Configurable execution provider
 - **Hybrid approach** - Heuristics validate, RAG retrieves context, AI decides
 - **Structured output** - JSON responses for reliable parsing
@@ -186,7 +186,7 @@ dotnet build SentinAI.sln
 
 ### 2. Download AI Model
 
-The Phi-3 model (~2.5GB) downloads automatically on first run, or manually:
+The Phi-4 Mini model (~2.5GB) downloads automatically on first run, or manually:
 
 ```powershell
 # Download CPU model (recommended)
@@ -196,7 +196,7 @@ The Phi-3 model (~2.5GB) downloads automatically on first run, or manually:
 .\download-models.ps1 -Provider DirectML
 
 # Or download both
-.\download-models.ps1 -Provider All
+.\download-models.ps1 -Provider Both
 ```
 
 ### 3. Setup RAG Memory (Optional but Recommended)
@@ -235,7 +235,7 @@ Edit `src/SentinAI.Web/appsettings.json`:
     "ModelPath": "",
     "ForceModelRedownload": false,
     "InferenceTimeoutSeconds": 60,
-    "MaxSequenceLength": 2048,
+    "MaxSequenceLength": 4096,
     "MaxOutputTokens": 150,
     "Temperature": 0.1
   },
@@ -259,8 +259,8 @@ Edit `src/SentinAI.Web/appsettings.json`:
 ### Model Locations
 
 Models are stored in:
-- **CPU:** `%LocalAppData%\SentinAI\Models\Phi3-Mini-CPU\`
-- **DirectML:** `%LocalAppData%\SentinAI\Models\Phi3-Mini-DirectML\`
+- **CPU:** `%LocalAppData%\SentinAI\Models\Phi4-Mini-CPU\`
+- **DirectML:** `%LocalAppData%\SentinAI\Models\Phi4-Mini-DirectML\`
 
 ## 🔐 Security
 
@@ -318,7 +318,7 @@ Enable detailed AI logs in `appsettings.json`:
 
 - [x] Hybrid AI + Heuristics engine
 - [x] CPU and DirectML support
-- [x] Phi-3 Mini integration
+- [x] Phi-4 Mini integration
 - [x] Winapp2 rules parser
 - [x] Web dashboard
 - [x] RAG memory system (Weaviate + Ollama)
@@ -337,7 +337,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 **Dependencies:**
 - [ONNX Runtime GenAI](https://github.com/microsoft/onnxruntime-genai) - MIT
-- [Phi-3 Mini](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct) - MIT
+- [Phi-4 Mini](https://huggingface.co/microsoft/Phi-4-mini-instruct) - MIT
 - [Winapp2](https://github.com/MoscaDotTo/Winapp2) - CC BY-NC-SA
 - [Weaviate](https://weaviate.io/) - BSD-3-Clause
 - [Ollama](https://ollama.ai/) - MIT
@@ -355,4 +355,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-**Built with** .NET 8, Blazor, ONNX Runtime, Phi-3 AI, Weaviate, and Ollama
+**Built with** .NET 8, Blazor, ONNX Runtime, Phi-4 Mini AI, Weaviate, and Ollama
