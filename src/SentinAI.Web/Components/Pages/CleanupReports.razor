@@ -1,0 +1,353 @@
+@page "/cleanup-reports"
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Cleanup Reports - SentinAI</PageTitle>
+
+<div class="reports-container">
+    <div class="text-center mb-4">
+        <h1 class="display-6">📋 Cleanup Reports</h1>
+        <p class="text-muted">Review AI findings and approve or reject cleanup recommendations</p>
+    </div>
+
+    @* Pending Items Alert *@
+    @if (pendingItems != null && pendingItems.Any())
+    {
+        <div class="row justify-content-center mb-4">
+            <div class="col-lg-10">
+                <div class="alert alert-warning d-flex align-items-center justify-content-between" role="alert">
+                    <div>
+                        <strong>📋 @pendingItems.Count items pending review</strong>
+                        <span class="text-muted ms-2">(@FormatBytes(pendingItems.Sum(p => p.SizeBytes)) potential space)</span>
+                    </div>
+                    <div>
+                        <button class="btn btn-success btn-sm me-2" @onclick="ApproveAll" disabled="@isProcessing">
+                            ✅ Approve All
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="RejectAll" disabled="@isProcessing">
+                            ❌ Keep All
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Pending Items List *@
+    <div class="row justify-content-center mb-4">
+        <div class="col-lg-10">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-0 pt-4">
+                    <h5 class="mb-0">
+                        <span class="me-2">⏳</span>
+                        Pending Review
+                    </h5>
+                </div>
+                <div class="card-body">
+                    @if (isLoading)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-2 text-muted">Loading pending items...</p>
+                        </div>
+                    }
+                    else if (pendingItems == null || !pendingItems.Any())
+                    {
+                        <div class="text-center py-5">
+                            <span class="display-4">✨</span>
+                            <h5 class="mt-3 text-muted">No pending reviews</h5>
+                            <p class="text-muted small">All caught up! Check back after your scheduled cleanups run.</p>
+                            <a href="/scheduler" class="btn btn-primary mt-2">
+                                ⏰ Manage Schedules
+                            </a>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>File</th>
+                                        <th>Size</th>
+                                        <th>Category</th>
+                                        <th>AI Confidence</th>
+                                        <th>AI Reasoning</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in pendingItems)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <span class="me-2">📄</span>
+                                                    <div>
+                                                        <div class="fw-semibold text-truncate" style="max-width: 250px;" title="@item.FilePath">
+                                                            @item.FileName
+                                                        </div>
+                                                        <small class="text-muted text-truncate d-block" style="max-width: 250px;">
+                                                            @GetDirectoryPath(item.FilePath)
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td>@FormatBytes(item.SizeBytes)</td>
+                                            <td>
+                                                <span class="badge bg-secondary">@item.Category</span>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <div class="progress flex-grow-1 me-2" style="width: 60px; height: 8px;">
+                                                        <div class="progress-bar @GetConfidenceColor(item.AiConfidence)" 
+                                                             style="width: @(item.AiConfidence * 100)%"></div>
+                                                    </div>
+                                                    <span class="small">@((item.AiConfidence * 100).ToString("F0"))%</span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <small class="text-muted" title="@item.AiReasoning">
+                                                    @TruncateText(item.AiReasoning, 50)
+                                                </small>
+                                            </td>
+                                            <td class="text-end">
+                                                <button class="btn btn-success btn-sm me-1" 
+                                                        @onclick="() => ApproveItem(item.Id)"
+                                                        disabled="@isProcessing"
+                                                        title="Delete this file">
+                                                    ✅
+                                                </button>
+                                                <button class="btn btn-outline-secondary btn-sm" 
+                                                        @onclick="() => RejectItem(item.Id)"
+                                                        disabled="@isProcessing"
+                                                        title="Keep this file">
+                                                    ❌
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Recent Reports Section *@
+    @if (recentHistory != null && recentHistory.Any())
+    {
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-4">
+                        <h5 class="mb-0">
+                            <span class="me-2">📊</span>
+                            Recent Cleanup Reports
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group list-group-flush">
+                            @foreach (var entry in recentHistory.Take(10))
+                            {
+                                <div class="list-group-item px-0 py-3 d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <span class="me-2">@(entry.Success ? "✅" : "❌")</span>
+                                        <span class="fw-semibold">@entry.TaskName</span>
+                                        <small class="text-muted ms-2">
+                                            @entry.ExecutedAt.ToLocalTime().ToString("MMM d, h:mm tt")
+                                        </small>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        @if (entry.BytesFreed > 0)
+                                        {
+                                            <span class="badge bg-success-subtle text-success">
+                                                @FormatBytes(entry.BytesFreed) freed
+                                            </span>
+                                        }
+                                        @if (entry.FilesDeleted > 0)
+                                        {
+                                            <span class="badge bg-info-subtle text-info">
+                                                @entry.FilesDeleted files
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .reports-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    .bg-success-subtle {
+        background-color: rgba(25, 135, 84, 0.1);
+    }
+    
+    .bg-info-subtle {
+        background-color: rgba(13, 202, 240, 0.1);
+    }
+</style>
+
+@code {
+    private List<PendingItemDto>? pendingItems;
+    private List<ExecutionHistoryDto>? recentHistory;
+    private bool isLoading = true;
+    private bool isProcessing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            pendingItems = await httpClient.GetFromJsonAsync<List<PendingItemDto>>("api/scheduler/pending");
+            recentHistory = await httpClient.GetFromJsonAsync<List<ExecutionHistoryDto>>("api/scheduler/history");
+        }
+        catch
+        {
+            pendingItems = new();
+            recentHistory = new();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task ApproveItem(string itemId)
+    {
+        isProcessing = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            await httpClient.PostAsync($"api/scheduler/pending/{itemId}/approve", null);
+            await LoadData();
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task RejectItem(string itemId)
+    {
+        isProcessing = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            await httpClient.PostAsync($"api/scheduler/pending/{itemId}/reject", null);
+            await LoadData();
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task ApproveAll()
+    {
+        isProcessing = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            await httpClient.PostAsync("api/scheduler/pending/approve-all?taskId=all", null);
+            await LoadData();
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task RejectAll()
+    {
+        isProcessing = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            await httpClient.PostAsync("api/scheduler/pending/reject-all?taskId=all", null);
+            await LoadData();
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    private static string GetDirectoryPath(string filePath)
+    {
+        try { return Path.GetDirectoryName(filePath) ?? ""; }
+        catch { return ""; }
+    }
+
+    private static string TruncateText(string text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+        return text.Length <= maxLength ? text : text.Substring(0, maxLength) + "...";
+    }
+
+    private static string GetConfidenceColor(double confidence)
+    {
+        return confidence switch
+        {
+            >= 0.9 => "bg-success",
+            >= 0.7 => "bg-warning",
+            _ => "bg-danger"
+        };
+    }
+
+    // DTOs
+    private class PendingItemDto
+    {
+        public string Id { get; set; } = "";
+        public string FilePath { get; set; } = "";
+        public string FileName { get; set; } = "";
+        public long SizeBytes { get; set; }
+        public string Category { get; set; } = "";
+        public double AiConfidence { get; set; }
+        public string AiReasoning { get; set; } = "";
+        public bool AiRecommendsDeletion { get; set; }
+    }
+
+    private record ExecutionHistoryDto(
+        string TaskId,
+        string TaskName,
+        DateTimeOffset ExecutedAt,
+        bool Success,
+        int FilesDeleted,
+        long BytesFreed,
+        string? ErrorMessage);
+}

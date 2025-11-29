@@ -1,0 +1,96 @@
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">
+            <span class="brand-icon">🧹</span> SentinAI
+        </a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        @* Main Section *@
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="nav-icon">🏠</span> Home
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="duplicates">
+                <span class="nav-icon">📂</span> Find Duplicates
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="scheduler">
+                <span class="nav-icon">⏰</span> Auto Cleanup
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="cleanup-reports">
+                <span class="nav-icon">📋</span> Pending Reviews
+            </NavLink>
+        </div>
+
+        @* Divider *@
+        <div class="nav-section-divider px-3 mt-3 mb-2">
+            <small class="text-uppercase text-muted">Advanced</small>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="dashboard">
+                <span class="nav-icon">📊</span> Dashboard
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="brain-memory">
+                <span class="nav-icon">🧠</span> AI Memory
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="usn-monitor">
+                <span class="nav-icon">📡</span> Live Monitor
+            </NavLink>
+        </div>
+
+        @* Settings *@
+        <div class="nav-section-divider px-3 mt-3 mb-2">
+            <small class="text-uppercase text-muted">Settings</small>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="settings">
+                <span class="nav-icon">⚙️</span> Settings
+            </NavLink>
+        </div>
+    </nav>
+</div>
+
+<style>
+    .brand-icon {
+        font-size: 1.2rem;
+        margin-right: 0.25rem;
+    }
+
+    .nav-icon {
+        display: inline-block;
+        width: 1.5rem;
+        text-align: center;
+        margin-right: 0.5rem;
+    }
+
+    .nav-section-divider {
+        border-top: 1px solid rgba(255,255,255,0.1);
+        padding-top: 0.5rem;
+    }
+
+    .nav-section-divider small {
+        font-size: 0.7rem;
+        letter-spacing: 0.05em;
+    }
+</style>

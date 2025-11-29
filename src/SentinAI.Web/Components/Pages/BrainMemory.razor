@@ -1,0 +1,398 @@
+@page "/brain-memory"
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Brain Memory - SentinAI</PageTitle>
+
+<h1>🧠 Brain Memory & Learning</h1>
+<p class="text-muted">View what SentinAI has learned from past analyses. The RAG store helps the AI make consistent, context-aware decisions.</p>
+
+@* Memory Status Card *@
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card @(memoryStatus?.Enabled == true ? "border-success" : "border-warning")">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">📊 Memory System Status</h5>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="LoadStatusAsync">
+                    <span class="oi oi-reload"></span>
+                </button>
+            </div>
+            <div class="card-body">
+                @if (memoryStatus == null)
+                {
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    <span class="ms-2">Loading status...</span>
+                }
+                else
+                {
+                    <div class="row">
+                        <div class="col-md-3">
+                            <strong>Status:</strong>
+                            @if (memoryStatus.Enabled)
+                            {
+                                <span class="badge bg-success">Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning text-dark">Disabled</span>
+                            }
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Provider:</strong>
+                            <span class="badge bg-info">@memoryStatus.Provider</span>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Purpose:</strong>
+                            <span class="text-muted">@memoryStatus.Description</span>
+                        </div>
+                    </div>
+                    @if (!memoryStatus.Enabled)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0">
+                            <strong>⚠️ RAG Store Disabled</strong> - The memory system is not active. 
+                            Enable it in <code>appsettings.json</code> under <code>RagStore.Enabled</code> and ensure Weaviate is running.
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@* How It Works Section *@
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">💡 How Brain Memory Works</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="text-center mb-3">
+                            <span class="display-4">📝</span>
+                        </div>
+                        <h6 class="text-center">1. Store Decisions</h6>
+                        <p class="text-muted small">
+                            Every time the AI analyzes a folder, the decision (safe/unsafe, confidence, reason) 
+                            is stored as a "memory" with semantic embeddings.
+                        </p>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center mb-3">
+                            <span class="display-4">🔍</span>
+                        </div>
+                        <h6 class="text-center">2. Semantic Search</h6>
+                        <p class="text-muted small">
+                            When analyzing a new folder, the system searches for similar past decisions 
+                            using vector similarity (not just keyword matching).
+                        </p>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center mb-3">
+                            <span class="display-4">🎯</span>
+                        </div>
+                        <h6 class="text-center">3. Context-Aware AI</h6>
+                        <p class="text-muted small">
+                            Retrieved memories are injected into the AI prompt, helping Phi-4 Mini make 
+                            consistent decisions based on what worked before.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Search Memories Section *@
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">🔎 Search Memories</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label">Search Query</label>
+                        <input type="text" class="form-control" @bind="searchQuery" 
+                               placeholder="e.g., temp folder, node_modules, browser cache, downloads..." />
+                        <small class="text-muted">Search uses semantic similarity - describe what you're looking for in natural language.</small>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Limit</label>
+                        <select class="form-select" @bind="searchLimit">
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-primary w-100" @onclick="SearchMemoriesAsync" disabled="@isSearching">
+                            @if (isSearching)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                            }
+                            <span class="oi oi-magnifying-glass me-1"></span> Search
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Memory Results *@
+@if (searchError != null)
+{
+    <div class="alert alert-danger">
+        <strong>Error:</strong> @searchError
+    </div>
+}
+
+@if (memories != null && memories.Any())
+{
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">📚 Memory Results (@memories.Count found)</h5>
+                    <small class="text-muted">Sorted by relevance score</small>
+                </div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush" style="max-height: 600px; overflow-y: auto;">
+                        @foreach (var memory in memories)
+                        {
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div class="d-flex align-items-center gap-2">
+                                        @if (memory.Metadata?.TryGetValue("safeToDelete", out var safe) == true)
+                                        {
+                                            <span class="badge @(safe == "True" ? "bg-success" : "bg-warning text-dark")">
+                                                @(safe == "True" ? "✅ Safe" : "⚠️ Unsafe")
+                                            </span>
+                                        }
+                                        @if (memory.Metadata?.TryGetValue("category", out var category) == true)
+                                        {
+                                            <span class="badge bg-info">@category</span>
+                                        }
+                                        @if (memory.Metadata?.TryGetValue("source", out var source) == true)
+                                        {
+                                            <span class="badge @(source == "AI" ? "bg-primary" : "bg-secondary")">
+                                                @(source == "AI" ? "🤖 AI" : "📊 Heuristic")
+                                            </span>
+                                        }
+                                    </div>
+                                    <div class="text-end">
+                                        <span class="badge bg-light text-dark">
+                                            Score: @memory.Score.ToString("P0")
+                                        </span>
+                                        <small class="text-muted ms-2">@memory.Timestamp.ToLocalTime().ToString("g")</small>
+                                    </div>
+                                </div>
+                                <div class="mb-2">
+                                    @if (memory.Metadata?.TryGetValue("folderPath", out var path) == true)
+                                    {
+                                        <code class="small">@path</code>
+                                    }
+                                </div>
+                                <pre class="bg-light p-2 rounded small mb-0" style="white-space: pre-wrap; word-break: break-word;">@memory.Content</pre>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else if (memories != null && !memories.Any() && !isSearching)
+{
+    <div class="alert alert-info">
+        <strong>No memories found.</strong> The Brain hasn't stored any analysis decisions yet, or none match your search query.
+        <br /><br />
+        <strong>To populate memories:</strong>
+        <ol class="mb-0 mt-2">
+            <li>Go to the <a href="/dashboard">Dashboard</a></li>
+            <li>Run a "Full System Scan" or "Scan Folder"</li>
+            <li>Each analysis will be stored as a memory</li>
+        </ol>
+    </div>
+}
+
+@* Learning Insights *@
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📈 Learning Benefits</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Scenario</th>
+                            <th>Without Memory</th>
+                            <th>With Memory</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Similar Folders</strong></td>
+                            <td class="text-muted">Each analysis starts fresh</td>
+                            <td class="text-success">Retrieves past decisions for context</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Consistency</strong></td>
+                            <td class="text-muted">May vary between sessions</td>
+                            <td class="text-success">Learns from past patterns</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Edge Cases</strong></td>
+                            <td class="text-muted">AI guesses without context</td>
+                            <td class="text-success">References similar past decisions</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Speed</strong></td>
+                            <td class="text-muted">Full AI inference every time</td>
+                            <td class="text-success">Can boost confidence from cached patterns</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private MemoryStatusDto? memoryStatus;
+    private List<MemoryDto>? memories;
+    private string searchQuery = "";
+    private int searchLimit = 25;
+    private bool isSearching;
+    private string? searchError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadStatusAsync();
+        // Load recent memories on page load
+        await LoadRecentMemoriesAsync();
+    }
+
+    private async Task LoadRecentMemoriesAsync()
+    {
+        if (memoryStatus?.Enabled != true)
+        {
+            return;
+        }
+
+        isSearching = true;
+        searchError = null;
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            var response = await httpClient.GetFromJsonAsync<MemoryQueryResponse>(
+                $"api/brain/memory/recent?limit={searchLimit}");
+
+            if (response?.Memories != null)
+            {
+                memories = response.Memories.ToList();
+            }
+            else
+            {
+                memories = new List<MemoryDto>();
+            }
+        }
+        catch (Exception ex)
+        {
+            searchError = ex.Message;
+        }
+        finally
+        {
+            isSearching = false;
+        }
+    }
+
+    private async Task LoadStatusAsync()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            memoryStatus = await httpClient.GetFromJsonAsync<MemoryStatusDto>("api/brain/memory/status");
+        }
+        catch (Exception ex)
+        {
+            memoryStatus = new MemoryStatusDto(false, "Unknown", ex.Message);
+        }
+    }
+
+    private async Task SearchMemoriesAsync()
+    {
+        if (memoryStatus?.Enabled != true)
+        {
+            searchError = "Memory system is disabled. Enable RAG store in configuration.";
+            return;
+        }
+
+        isSearching = true;
+        searchError = null;
+        memories = null;
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            // If no query, load recent memories instead
+            if (string.IsNullOrWhiteSpace(searchQuery))
+            {
+                await LoadRecentMemoriesAsync();
+                return;
+            }
+
+            // Semantic search across all memories
+            var response = await httpClient.GetFromJsonAsync<MemoryQueryResponse>(
+                $"api/brain/memory/search?query={Uri.EscapeDataString(searchQuery)}&limit={searchLimit}");
+
+            if (response?.Memories != null)
+            {
+                memories = response.Memories
+                    .OrderByDescending(m => m.Score)
+                    .ToList();
+            }
+            else
+            {
+                memories = new List<MemoryDto>();
+            }
+        }
+        catch (Exception ex)
+        {
+            searchError = ex.Message;
+        }
+        finally
+        {
+            isSearching = false;
+        }
+    }
+
+    private record MemoryStatusDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("enabled")] bool Enabled,
+        [property: System.Text.Json.Serialization.JsonPropertyName("provider")] string Provider,
+        [property: System.Text.Json.Serialization.JsonPropertyName("description")] string Description);
+
+    private record MemoryQueryResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("enabled")] bool Enabled,
+        [property: System.Text.Json.Serialization.JsonPropertyName("count")] int Count,
+        [property: System.Text.Json.Serialization.JsonPropertyName("memories")] List<MemoryDto> Memories);
+
+    private record MemoryDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("content")] string Content,
+        [property: System.Text.Json.Serialization.JsonPropertyName("timestamp")] DateTimeOffset Timestamp,
+        [property: System.Text.Json.Serialization.JsonPropertyName("score")] double Score,
+        [property: System.Text.Json.Serialization.JsonPropertyName("metadata")] Dictionary<string, string>? Metadata);
+}
