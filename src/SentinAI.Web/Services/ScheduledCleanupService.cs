@@ -555,10 +555,11 @@ public class ScheduledCleanupService : BackgroundService, IScheduledCleanupServi
                 var fileNames = files.Select(Path.GetFileName).Where(n => n != null).Cast<string>().ToList();
                 var suggestion = await brain.AnalyzeFolderAsync(targetPath, fileNames);
 
+                var categoryStr = suggestion.Category ?? "Unknown";
                 var shouldClean = suggestion.SafeToDelete &&
                     suggestion.Confidence >= config.MinConfidence &&
                     (config.Categories == null || config.Categories.Count == 0 ||
-                     config.Categories.Contains(suggestion.Category.ToString()));
+                     config.Categories.Contains(categoryStr));
 
                 if (!shouldClean)
                 {
@@ -569,7 +570,7 @@ public class ScheduledCleanupService : BackgroundService, IScheduledCleanupServi
                         {
                             FilePath = file,
                             SizeBytes = TryGetFileSize(file),
-                            Category = suggestion.Category.ToString(),
+                            Category = categoryStr,
                             Confidence = suggestion.Confidence,
                             Reason = $"AI confidence {suggestion.Confidence:P0} below threshold or category mismatch",
                             Action = CleanupReportItemAction.Skipped
@@ -600,7 +601,7 @@ public class ScheduledCleanupService : BackgroundService, IScheduledCleanupServi
                                 {
                                     FilePath = file,
                                     SizeBytes = size,
-                                    Category = suggestion.Category.ToString(),
+                                    Category = categoryStr,
                                     Confidence = suggestion.Confidence,
                                     Reason = suggestion.Reason ?? "AI recommended deletion",
                                     Action = CleanupReportItemAction.Deleted
@@ -614,7 +615,7 @@ public class ScheduledCleanupService : BackgroundService, IScheduledCleanupServi
                                 {
                                     FilePath = file,
                                     SizeBytes = TryGetFileSize(file),
-                                    Category = suggestion.Category.ToString(),
+                                    Category = categoryStr,
                                     Confidence = suggestion.Confidence,
                                     Reason = ex.Message,
                                     Action = CleanupReportItemAction.Error
@@ -633,7 +634,7 @@ public class ScheduledCleanupService : BackgroundService, IScheduledCleanupServi
                             {
                                 FilePath = file,
                                 SizeBytes = size,
-                                Category = suggestion.Category.ToString(),
+                                Category = categoryStr,
                                 Confidence = suggestion.Confidence,
                                 Reason = "[DRY RUN] Would delete",
                                 Action = CleanupReportItemAction.Deleted
@@ -654,7 +655,7 @@ public class ScheduledCleanupService : BackgroundService, IScheduledCleanupServi
                             FilePath = file,
                             FileName = Path.GetFileName(file),
                             SizeBytes = size,
-                            Category = suggestion.Category.ToString(),
+                            Category = categoryStr,
                             AiConfidence = suggestion.Confidence,
                             AiReasoning = suggestion.Reason ?? "AI recommends deletion based on file analysis",
                             AiRecommendsDeletion = true,
@@ -670,7 +671,7 @@ public class ScheduledCleanupService : BackgroundService, IScheduledCleanupServi
                         {
                             FilePath = file,
                             SizeBytes = size,
-                            Category = suggestion.Category.ToString(),
+                            Category = categoryStr,
                             Confidence = suggestion.Confidence,
                             Reason = suggestion.Reason ?? "Pending user review",
                             Action = CleanupReportItemAction.PendingReview
