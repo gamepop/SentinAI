@@ -1,0 +1,103 @@
+@page "/about"
+@rendermode InteractiveServer
+
+<PageTitle>About - SentinAI</PageTitle>
+
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="text-center mb-5">
+                <div class="display-1 mb-3">🧹</div>
+                <h1 class="display-4 fw-bold text-primary">SentinAI</h1>
+                <p class="lead text-muted">
+                    An Autonomous, Local-First Agent for Windows Storage Health
+                </p>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-body p-4">
+                    <h5 class="card-title mb-3">
+                        <span class="me-2">👨‍💻</span> About
+                    </h5>
+                    <p class="card-text">
+                        Developed by <a href="https://github.com/gamepop" target="_blank" class="fw-bold text-decoration-none">@gamepop</a> 
+                        to agentically solve Windows storage issues once and for always! 🚀
+                    </p>
+                    <p class="card-text text-muted">
+                        SentinAI is an intelligent, privacy-first cleanup agent that uses local AI (Phi-3) 
+                        to understand your files and make smart decisions about what's safe to delete—without 
+                        sending a single byte of your data to the cloud.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-body p-4">
+                    <h5 class="card-title mb-3">
+                        <span class="me-2">✨</span> Key Features
+                    </h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2">
+                            <span class="text-success me-2">✓</span>
+                            <strong>Autonomous Monitoring</strong> - Real-time file system monitoring via USN Journal
+                        </li>
+                        <li class="mb-2">
+                            <span class="text-success me-2">✓</span>
+                            <strong>AI-Powered Analysis</strong> - Phi-3 Mini understands file context and intent
+                        </li>
+                        <li class="mb-2">
+                            <span class="text-success me-2">✓</span>
+                            <strong>Local-First Privacy</strong> - All processing happens on your machine
+                        </li>
+                        <li class="mb-2">
+                            <span class="text-success me-2">✓</span>
+                            <strong>Adaptive Learning</strong> - RAG memory learns from your decisions
+                        </li>
+                        <li class="mb-2">
+                            <span class="text-success me-2">✓</span>
+                            <strong>Duplicate Detection</strong> - SHA256 hash-based duplicate file finder
+                        </li>
+                        <li class="mb-2">
+                            <span class="text-success me-2">✓</span>
+                            <strong>Scheduled Cleanup</strong> - Automated cleanup with approval modes
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-body p-4">
+                    <h5 class="card-title mb-3">
+                        <span class="me-2">🛠️</span> Technology Stack
+                    </h5>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <ul class="list-unstyled">
+                                <li class="mb-1"><span class="badge bg-primary me-2">.NET 8</span> Blazor Server</li>
+                                <li class="mb-1"><span class="badge bg-info me-2">AI</span> Phi-3 Mini (ONNX)</li>
+                                <li class="mb-1"><span class="badge bg-secondary me-2">RAG</span> Weaviate Vector DB</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <ul class="list-unstyled">
+                                <li class="mb-1"><span class="badge bg-success me-2">API</span> gRPC + REST</li>
+                                <li class="mb-1"><span class="badge bg-warning text-dark me-2">FS</span> USN Journal</li>
+                                <li class="mb-1"><span class="badge bg-dark me-2">OS</span> Windows Service</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-center">
+                <a href="https://github.com/gamepop/SentinAI" target="_blank" class="btn btn-outline-dark btn-lg">
+                    <span class="me-2">⭐</span> View on GitHub
+                </a>
+            </div>
+
+            <div class="text-center mt-4 text-muted">
+                <small>Made with ❤️ for a cleaner Windows experience</small>
+            </div>
+        </div>
+    </div>
+</div>
