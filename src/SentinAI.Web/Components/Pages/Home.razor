@@ -1,0 +1,965 @@
+﻿@page "/"
+@page "/home"
+@using System.IO
+@using System.Net.Http.Json
+@using System.Text.Json
+@using SentinAI.Shared.Models
+@using SentinAI.Shared.Services
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@inject ILogger<Home> Logger
+@inject IConfigurationManager ConfigManager
+@rendermode InteractiveServer
+
+<PageTitle>SentinAI - Smart Storage Cleanup</PageTitle>
+
+<div class="home-container">
+    @* Hero Section *@
+    <div class="text-center mb-5">
+        <div class="hero-icon mb-3">
+            <span class="display-1">🧹</span>
+        </div>
+        <h1 class="display-5 fw-bold text-primary">SentinAI</h1>
+        <p class="lead text-muted">Keep your PC clean and fast with AI-powered cleanup</p>
+    </div>
+
+    @* Main Action Card *@
+    <div class="row justify-content-center mb-4">
+        <div class="col-md-8 col-lg-6">
+            <div class="card shadow-lg border-0 main-action-card">
+                <div class="card-body text-center p-5">
+                    @if (isLoading)
+                    {
+                        <div class="mb-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                        <p class="text-muted">Checking for pending items...</p>
+                    }
+                    else if (isScanning)
+                    {
+                        <div class="scanning-animation mb-4">
+                            <div class="spinner-grow text-primary" style="width: 4rem; height: 4rem;" role="status">
+                                <span class="visually-hidden">Scanning...</span>
+                            </div>
+                        </div>
+                        <h3 class="mb-3">@(aiAutoMode ? "🤖 AI Scanning & Cleaning..." : "Scanning your PC...")</h3>
+                        <p class="text-muted mb-4">@(aiAutoMode ? "AI is analyzing and auto-cleaning safe items" : "This usually takes less than a minute")</p>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated @(aiAutoMode ? "bg-info" : "")" 
+                                 role="progressbar" style="width: @scanProgress%"></div>
+                        </div>
+                        <small class="text-muted mt-2 d-block">@scanStatus</small>
+                    }
+                    else if (pendingItems.Count > 0)
+                    {
+                        <div class="result-icon mb-3">
+                            <span class="display-4">🔍</span>
+                        </div>
+                        <h3 class="mb-2 text-primary">Review Items to Clean</h3>
+                        <p class="text-muted mb-3">Found @pendingItems.Count item(s) to review</p>
+                        @if (autoCleanedCount > 0)
+                        {
+                            <div class="alert alert-info mb-3">
+                                <span class="me-2">🤖</span> AI automatically cleaned @autoCleanedCount item(s)
+                            </div>
+                        }
+                    }
+                    else if (cleanupComplete)
+                    {
+                        <div class="result-icon mb-4">
+                            <span class="display-1">🎊</span>
+                        </div>
+                        <h3 class="mb-3 text-success">Cleanup Complete!</h3>
+                        @if (autoCleanedCount > 0)
+                        {
+                            <p class="text-muted mb-2">
+                                <span class="badge bg-info me-1">🤖 AI</span> @autoCleanedCount item(s) auto-cleaned
+                            </p>
+                        }
+                        @if (itemsCleanedCount > 0)
+                        {
+                            <p class="text-muted mb-4">@itemsCleanedCount item(s) cleaned manually</p>
+                        }
+                        else if (autoCleanedCount == 0)
+                        {
+                            <p class="text-muted mb-4">Your PC is already clean!</p>
+                        }
+                        <button class="btn btn-primary btn-lg" @onclick="ScanAgainAsync">
+                            Scan Again
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="result-icon mb-4">
+                            <span class="display-1">🎉</span>
+                        </div>
+                        <h3 class="mb-3 text-success">Your PC is clean!</h3>
+                        <p class="text-muted mb-4">No junk files found. Great job keeping your system tidy!</p>
+                        
+                        @* AI Auto Mode Toggle *@
+                        <div class="ai-mode-toggle mb-4">
+                            <div class="form-check form-switch d-flex justify-content-center align-items-center gap-2">
+                                <input class="form-check-input" type="checkbox" role="switch" id="aiModeSwitch" 
+                                       @bind="aiAutoMode" style="width: 3rem; height: 1.5rem;">
+                                <label class="form-check-label" for="aiModeSwitch">
+                                    <span class="fw-semibold @(aiAutoMode ? "text-info" : "text-muted")">
+                                        🤖 AI Auto Mode
+                                    </span>
+                                </label>
+                            </div>
+                            <small class="text-muted d-block mt-1">
+                                @(aiAutoMode 
+                                    ? "AI will auto-clean high-confidence items based on RAG learning" 
+                                    : "Manual approval required for all items")
+                            </small>
+                        </div>
+                        
+                        <button class="btn @(aiAutoMode ? "btn-info" : "btn-primary") btn-lg px-5" @onclick="StartQuickScanAsync">
+                            <span class="me-2">@(aiAutoMode ? "🤖" : "🚀")</span> 
+                            @(aiAutoMode ? "AI Smart Scan" : "Quick Scan")
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Pending Items Review Section *@
+    @if (pendingItems.Count > 0)
+    {
+        <div class="row justify-content-center mb-4">
+            <div class="col-md-10 col-lg-8">
+                <div class="card shadow border-0">
+                    <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3">
+                        <span class="fw-semibold">
+                            <span class="me-2">📋</span> Items Found
+                        </span>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-primary rounded-pill">@pendingItems.Count item(s)</span>
+                            @if (pendingItems.Count > 1)
+                            {
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-success" @onclick="ApproveAllAsync" disabled="@isProcessing" title="Approve all items">
+                                        <span>&#x2714;</span> All
+                                    </button>
+                                    <button class="btn btn-outline-danger" @onclick="DismissAllAsync" disabled="@isProcessing" title="Dismiss all items">
+                                        <span>&#x2716;</span> All
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    <div class="list-group list-group-flush">
+                        @foreach (var item in pendingItems)
+                        {
+                            <div class="list-group-item py-3 @(item.IsProcessing ? "bg-light" : "")">
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0 me-3">
+                                        @if (item.SafeToDelete)
+                                        {
+                                            <span class="badge bg-success rounded-pill" title="Safe to delete">
+                                                <span>&#x2714;</span> Safe
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning text-dark rounded-pill" title="Review recommended">
+                                                <span>&#x26A0;</span> Review
+                                            </span>
+                                        }
+                                    </div>
+                                    <div class="flex-grow-1 min-width-0">
+                                        <div class="d-flex justify-content-between align-items-start mb-1">
+                                            <h6 class="mb-0 text-truncate" style="max-width: 350px;" title="@item.FilePath">
+                                                @GetFriendlyName(item.FilePath)
+                                            </h6>
+                                        </div>
+                                        <p class="text-muted small mb-1">@item.Reason</p>
+                                        <small class="text-muted font-monospace" style="font-size: 0.7rem;">@item.FilePath</small>
+                                    </div>
+                                    <div class="flex-shrink-0 ms-3">
+                                        @if (item.IsProcessing)
+                                        {
+                                            <span class="spinner-border spinner-border-sm text-primary" role="status"></span>
+                                        }
+                                        else
+                                        {
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-success" @onclick="() => ApproveItemAsync(item)" 
+                                                        disabled="@isProcessing" title="Clean this item">
+                                                    <span>&#x2714;</span>
+                                                </button>
+                                                <button class="btn btn-outline-secondary" @onclick="() => SkipItemAsync(item)" 
+                                                        disabled="@isProcessing" title="Skip this item">
+                                                    <span>&#x2716;</span>
+                                                </button>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Error Display *@
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="row justify-content-center mb-4">
+            <div class="col-md-8 col-lg-6">
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Oops!</strong> @errorMessage
+                    <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Quick Stats *@
+    @if (brainStatus != null)
+    {
+        <div class="row justify-content-center mb-4">
+            <div class="col-md-8 col-lg-6">
+                <div class="row g-3">
+                    <div class="col-4">
+                        <div class="card border-0 bg-light text-center p-3">
+                            <div class="stat-number text-primary fw-bold">@brainStatus.Statistics?.TotalAnalyses</div>
+                            <small class="text-muted">Scans</small>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="card border-0 bg-light text-center p-3">
+                            <div class="stat-number text-success fw-bold">@brainStatus.Statistics?.SafeToDeleteCount</div>
+                            <small class="text-muted">Items Cleaned</small>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="card border-0 bg-light text-center p-3">
+                            <div class="stat-icon">
+                                @if (brainStatus.IsReady)
+                                {
+                                    <span class="text-success">✓</span>
+                                }
+                                else
+                                {
+                                    <span class="text-warning">○</span>
+                                }
+                            </div>
+                            <small class="text-muted">AI Ready</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Feature Cards *@
+    <div class="row justify-content-center">
+        <div class="col-md-10 col-lg-8">
+            <div class="row g-4">
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm feature-card" @onclick='() => Navigation.NavigateTo("/duplicates")'>
+                        <div class="card-body text-center p-4">
+                            <div class="feature-icon mb-3">
+                                <span class="display-5" aria-label="folder">&#x1F4C2;</span>
+                            </div>
+                            <h6 class="card-title">Find Duplicates</h6>
+                            <p class="card-text small text-muted">Find and remove duplicate files wasting space</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm feature-card" @onclick='() => Navigation.NavigateTo("/scheduler")'>
+                        <div class="card-body text-center p-4">
+                            <div class="feature-icon mb-3">
+                                <span class="display-5" aria-label="clock">&#x23F0;</span>
+                            </div>
+                            <h6 class="card-title">Auto Cleanup</h6>
+                            <p class="card-text small text-muted">Schedule automatic cleanups</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm feature-card" @onclick='() => Navigation.NavigateTo("/dashboard")'>
+                        <div class="card-body text-center p-4">
+                            <div class="feature-icon mb-3">
+                                <span class="display-5" aria-label="gear">&#x2699;</span>
+                            </div>
+                            <h6 class="card-title">Advanced</h6>
+                            <p class="card-text small text-muted">Full control &amp; detailed analysis</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Trust Indicators *@
+    <div class="row justify-content-center mt-5">
+        <div class="col-md-8 col-lg-6">
+            <div class="d-flex justify-content-center gap-4 text-muted small">
+                <span><span class="text-success">🔒</span> 100% Local</span>
+                <span><span class="text-primary">🤖</span> AI Powered</span>
+                <span><span class="text-warning">⚡</span> Safe & Fast</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .home-container {
+        padding: 2rem 1rem;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .hero-icon {
+        animation: float 3s ease-in-out infinite;
+    }
+
+    @@keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+    }
+
+    .main-action-card {
+        border-radius: 1.5rem;
+        background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+    }
+
+    .feature-card {
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border-radius: 1rem;
+    }
+
+    .feature-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 .5rem 1rem rgba(0,0,0,.15) !important;
+    }
+
+    .scanning-animation {
+        animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @@keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+
+    .stat-number {
+        font-size: 1.5rem;
+    }
+
+    .stat-icon {
+        font-size: 1.5rem;
+    }
+
+    .result-icon {
+        animation: pop 0.5s ease-out;
+    }
+
+    @@keyframes pop {
+        0% { transform: scale(0); }
+        50% { transform: scale(1.2); }
+        100% { transform: scale(1); }
+    }
+</style>
+
+@code {
+    private bool isLoading = true;
+    private bool isScanning;
+    private bool cleanupComplete;
+    private bool isProcessing;
+    private bool aiAutoMode;
+    private int scanProgress;
+    private string scanStatus = "Initializing...";
+    private string? errorMessage;
+    private int itemsCleanedCount;
+    private int autoCleanedCount;
+    private BrainStatusDto? brainStatus;
+    private string? currentAnalysisId;
+    private List<PendingItemModel> pendingItems = new();
+    private SentinelConfig? config;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadConfigAsync();
+        await LoadBrainStatusAsync();
+        await LoadPendingSuggestionsAsync();
+        isLoading = false;
+    }
+
+    private async Task LoadConfigAsync()
+    {
+        try
+        {
+            config = await ConfigManager.LoadConfigAsync();
+            aiAutoMode = config?.AiAutoModeEnabled ?? false;
+        }
+        catch
+        {
+            config = new SentinelConfig();
+        }
+    }
+
+    private async Task LoadBrainStatusAsync()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            brainStatus = await httpClient.GetFromJsonAsync<BrainStatusDto>("api/brain/status");
+        }
+        catch
+        {
+            // Ignore - status is optional
+        }
+    }
+
+    private async Task LoadPendingSuggestionsAsync()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            
+            var response = await httpClient.GetAsync("api/agent/suggestions");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var suggestions = JsonSerializer.Deserialize<PendingSuggestionsDto>(json, jsonOptions);
+                
+                if (suggestions?.Analyses?.Any() == true)
+                {
+                    var analysis = suggestions.Analyses.First();
+                    currentAnalysisId = analysis.AnalysisId;
+                    
+                    // Convert to view model for individual tracking
+                    pendingItems = analysis.Suggestions?
+                        .Select(s => new PendingItemModel
+                        {
+                            AnalysisId = analysis.AnalysisId,
+                            FilePath = s.FilePath,
+                            SizeBytes = s.SizeBytes,
+                            Category = s.Category,
+                            SafeToDelete = s.SafeToDelete,
+                            Reason = s.Reason
+                        })
+                        .ToList() ?? new();
+                }
+            }
+        }
+        catch
+        {
+            // Ignore - will show scan button
+        }
+    }
+
+    private async Task StartQuickScanAsync()
+    {
+        isScanning = true;
+        isLoading = false;
+        cleanupComplete = false;
+        errorMessage = null;
+        scanProgress = 0;
+        scanStatus = aiAutoMode ? "AI initializing..." : "Starting scan...";
+        pendingItems.Clear();
+        autoCleanedCount = 0;
+        itemsCleanedCount = 0;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+
+            // Start progress animation
+            _ = UpdateProgressAsync();
+
+            // Trigger the scan
+            var response = await httpClient.PostAsJsonAsync("api/agent/analyze", new
+            {
+                FullSystemScan = true,
+                Reason = aiAutoMode ? "AI Smart Scan from Home" : "Quick scan from Home"
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Exception("Failed to start scan");
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<AnalyzeResponseDto>();
+            currentAnalysisId = result?.AnalysisId;
+            
+            Logger.LogInformation("Quick scan started with AnalysisId: {AnalysisId}, AI Mode: {AiMode}", 
+                currentAnalysisId, aiAutoMode);
+
+            // Poll for results
+            await PollForResultsAsync(httpClient);
+
+            // If AI Auto Mode is enabled and there are items, auto-clean high confidence items
+            if (aiAutoMode)
+            {
+                if (pendingItems.Count > 0)
+                {
+                    await RunAiAutoCleanAsync(httpClient);
+                }
+                else
+                {
+                    // No items found, stop scanning
+                    isScanning = false;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Quick scan failed");
+            errorMessage = "Could not complete scan. Make sure the Sentinel Service is running.";
+            isScanning = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RunAiAutoCleanAsync(HttpClient httpClient)
+    {
+        scanStatus = "🤖 AI analyzing and cleaning...";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var threshold = config?.AiConfidenceThreshold ?? 0.85;
+            var categories = config?.AiAutoCleanCategories ?? new List<string> { "Temp", "Cache", "Logs", "BuildArtifacts" };
+
+            Logger.LogInformation("🤖 Running AI Auto-Clean with threshold={Threshold}, categories={Categories}",
+                threshold, string.Join(",", categories));
+
+            var autoCleanResponse = await httpClient.PostAsJsonAsync("api/agent/auto-clean", new
+            {
+                ConfidenceThreshold = threshold,
+                Categories = categories,
+                AnalysisId = currentAnalysisId
+            });
+
+            if (autoCleanResponse.IsSuccessStatusCode)
+            {
+                var autoCleanResult = await autoCleanResponse.Content.ReadFromJsonAsync<AutoCleanResultDto>();
+                
+                if (autoCleanResult != null)
+                {
+                    autoCleanedCount = autoCleanResult.AutoCleanedCount;
+                    
+                    Logger.LogInformation("🤖 AI Auto-Clean result: {Cleaned} cleaned, {Skipped} skipped",
+                        autoCleanedCount, autoCleanResult.SkippedCount);
+
+                    // Reload pending suggestions from server to get accurate state
+                    await ReloadPendingItemsAsync(httpClient);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "AI Auto-Clean encountered an error, falling back to manual review");
+        }
+
+        // Always stop scanning
+        isScanning = false;
+        scanProgress = 100;
+
+        // Determine final state
+        if (pendingItems.Count == 0)
+        {
+            if (autoCleanedCount > 0)
+            {
+                // AI cleaned everything
+                cleanupComplete = true;
+            }
+            // else: no items found at all - will show "PC is clean"
+        }
+        // else: there are pending items to review - will show review list
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReloadPendingItemsAsync(HttpClient httpClient)
+    {
+        try
+        {
+            var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var response = await httpClient.GetAsync("api/agent/suggestions");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var suggestions = JsonSerializer.Deserialize<PendingSuggestionsDto>(json, jsonOptions);
+                
+                if (suggestions?.Analyses?.Any() == true)
+                {
+                    var analysis = suggestions.Analyses.First();
+                    currentAnalysisId = analysis.AnalysisId;
+                    
+                    pendingItems = analysis.Suggestions?
+                        .Select(s => new PendingItemModel
+                        {
+                            AnalysisId = analysis.AnalysisId,
+                            FilePath = s.FilePath,
+                            SizeBytes = s.SizeBytes,
+                            Category = s.Category,
+                            SafeToDelete = s.SafeToDelete,
+                            Reason = s.Reason
+                        })
+                        .ToList() ?? new();
+                        
+                    Logger.LogInformation("Reloaded {Count} pending items from server", pendingItems.Count);
+                }
+                else
+                {
+                    pendingItems.Clear();
+                    Logger.LogInformation("No pending items after reload");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to reload pending items");
+        }
+    }
+
+    private async Task UpdateProgressAsync()
+    {
+        var normalStatuses = new[] { "Scanning temp files...", "Checking browser caches...", "Analyzing folders...", "Finishing up..." };
+        var aiStatuses = new[] { "🧠 AI analyzing patterns...", "📚 Consulting RAG memory...", "🔍 Evaluating confidence...", "🤖 Making decisions..." };
+        var statuses = aiAutoMode ? aiStatuses : normalStatuses;
+        var index = 0;
+
+        while (isScanning && scanProgress < 90)
+        {
+            await Task.Delay(500);
+            scanProgress = Math.Min(scanProgress + Random.Shared.Next(5, 15), 90);
+            scanStatus = statuses[index % statuses.Length];
+            index++;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task PollForResultsAsync(HttpClient httpClient)
+    {
+        var maxAttempts = 60; // Increased to 60 seconds for slower AI analysis
+        var attempt = 0;
+        var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        Logger.LogInformation("Starting to poll for results, looking for AnalysisId: {AnalysisId}", currentAnalysisId);
+
+        while (attempt < maxAttempts && isScanning)
+        {
+            await Task.Delay(1000);
+            attempt++;
+
+            try
+            {
+                var response = await httpClient.GetAsync("api/agent/suggestions");
+                var json = await response.Content.ReadAsStringAsync();
+                
+                Logger.LogDebug("Poll attempt {Attempt}: Response length={Length}", attempt, json.Length);
+
+                var suggestions = JsonSerializer.Deserialize<PendingSuggestionsDto>(json, jsonOptions);
+
+                if (suggestions?.Analyses?.Any() == true)
+                {
+                    // Try to find our specific analysis
+                    var analysis = suggestions.Analyses.FirstOrDefault(a => a.AnalysisId == currentAnalysisId);
+
+                    if (analysis != null)
+                    {
+                        Logger.LogInformation("Found analysis: Id={Id}, Items={Items}", 
+                            analysis.AnalysisId, analysis.Suggestions?.Count ?? 0);
+
+                        currentAnalysisId = analysis.AnalysisId;
+                        
+                        // Convert to view model
+                        pendingItems = analysis.Suggestions?
+                            .Select(s => new PendingItemModel
+                            {
+                                AnalysisId = analysis.AnalysisId,
+                                FilePath = s.FilePath,
+                                SizeBytes = s.SizeBytes,
+                                Category = s.Category,
+                                SafeToDelete = s.SafeToDelete,
+                                Reason = s.Reason
+                            })
+                            .ToList() ?? new();
+
+                        scanProgress = 100;
+                        
+                        Logger.LogInformation("Scan complete, found {Count} pending items, AI mode: {AiMode}", 
+                            pendingItems.Count, aiAutoMode);
+                        
+                        // Only stop scanning here if NOT in AI mode
+                        // AI mode will stop scanning after auto-clean completes
+                        if (!aiAutoMode)
+                        {
+                            isScanning = false;
+                        }
+                        
+                        await InvokeAsync(StateHasChanged);
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error polling for results on attempt {Attempt}", attempt);
+            }
+        }
+
+        Logger.LogWarning("Polling timed out after {Attempts} attempts with no results", maxAttempts);
+        
+        // Timeout - show error instead of "Clean"
+        errorMessage = "Scan timed out. The analysis is taking longer than expected. Please check back later.";
+        pendingItems.Clear();
+        scanProgress = 100;
+        isScanning = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ApproveItemAsync(PendingItemModel item)
+    {
+        if (string.IsNullOrEmpty(item.FilePath)) return;
+
+        item.IsProcessing = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+
+            // Call API to clean this specific path
+            var response = await httpClient.PostAsJsonAsync("api/agent/clean-path", new
+            {
+                Path = item.FilePath,
+                AnalysisId = item.AnalysisId
+            });
+
+            if (response.IsSuccessStatusCode)
+            {
+                pendingItems.Remove(item);
+                itemsCleanedCount++;
+                
+                if (pendingItems.Count == 0)
+                {
+                    cleanupComplete = true;
+                    await LoadBrainStatusAsync();
+                }
+            }
+            else
+            {
+                errorMessage = $"Could not clean {GetFriendlyName(item.FilePath)}. It may be in use.";
+                item.IsProcessing = false;
+            }
+        }
+        catch (Exception)
+        {
+            errorMessage = "Cleanup failed. Please try again.";
+            item.IsProcessing = false;
+        }
+        
+        StateHasChanged();
+    }
+
+    private void SkipItemAsync(PendingItemModel item)
+    {
+        pendingItems.Remove(item);
+        
+        if (pendingItems.Count == 0 && itemsCleanedCount > 0)
+        {
+            cleanupComplete = true;
+        }
+        
+        StateHasChanged();
+    }
+
+    private async Task ApproveAllAsync()
+    {
+        if (currentAnalysisId == null) return;
+
+        isProcessing = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+
+            var response = await httpClient.PostAsync($"api/agent/approve/{currentAnalysisId}", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                itemsCleanedCount = pendingItems.Count;
+                pendingItems.Clear();
+                cleanupComplete = true;
+                await LoadBrainStatusAsync();
+            }
+            else
+            {
+                errorMessage = "Cleanup failed. Some files may be in use.";
+            }
+        }
+        catch (Exception)
+        {
+            errorMessage = "Could not complete cleanup. Please try again.";
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DismissAllAsync()
+    {
+        if (currentAnalysisId == null) return;
+
+        isProcessing = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+
+            var response = await httpClient.PostAsync($"api/agent/reject/{currentAnalysisId}", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                pendingItems.Clear();
+                currentAnalysisId = null;
+            }
+            else
+            {
+                errorMessage = "Could not dismiss the analysis.";
+            }
+        }
+        catch (Exception)
+        {
+            errorMessage = "Could not dismiss. Please try again.";
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ScanAgainAsync()
+    {
+        cleanupComplete = false;
+        itemsCleanedCount = 0;
+        autoCleanedCount = 0;
+        pendingItems.Clear();
+        currentAnalysisId = null;
+        await StartQuickScanAsync();
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F1} GB";
+        if (bytes >= 1_048_576) return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes} B";
+    }
+
+    private string GetFriendlyName(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return "Unknown";
+        
+        if (path.Contains(@"\Temp", StringComparison.OrdinalIgnoreCase))
+        {
+            if (path.Contains("WINDOWS", StringComparison.OrdinalIgnoreCase))
+                return "Windows Temporary Files";
+            if (path.Contains("AppData", StringComparison.OrdinalIgnoreCase))
+                return "User Temporary Files";
+            return "Temporary Files";
+        }
+        if (path.Contains("Cache", StringComparison.OrdinalIgnoreCase))
+            return "Cache Files";
+        if (path.Contains("node_modules", StringComparison.OrdinalIgnoreCase))
+            return "Node.js Modules";
+        if (path.Contains(@"\bin\", StringComparison.OrdinalIgnoreCase) || 
+            path.Contains(@"\obj\", StringComparison.OrdinalIgnoreCase))
+            return "Build Artifacts";
+        
+        return Path.GetFileName(path.TrimEnd('\\', '/')) ?? path;
+    }
+
+    // View model for tracking individual items
+    private class PendingItemModel
+    {
+        public string? AnalysisId { get; set; }
+        public string? FilePath { get; set; }
+        public long SizeBytes { get; set; }
+        public string? Category { get; set; }
+        public bool SafeToDelete { get; set; }
+        public string? Reason { get; set; }
+        public bool IsProcessing { get; set; }
+    }
+
+    // DTOs
+    private record BrainStatusDto
+    {
+        public bool IsReady { get; init; }
+        public bool IsModelLoaded { get; init; }
+        public StatisticsDto? Statistics { get; init; }
+    }
+
+    private record StatisticsDto
+    {
+        public int TotalAnalyses { get; init; }
+        public int SafeToDeleteCount { get; init; }
+    }
+
+    private sealed record AnalyzeResponseDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("accepted")] bool Accepted,
+        [property: System.Text.Json.Serialization.JsonPropertyName("analysisId")] string? AnalysisId,
+        [property: System.Text.Json.Serialization.JsonPropertyName("foldersQueued")] int FoldersQueued,
+        [property: System.Text.Json.Serialization.JsonPropertyName("message")] string? Message);
+
+    private sealed record PendingSuggestionsDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("analyses")] List<PendingAnalysisDto>? Analyses);
+
+    private sealed record PendingAnalysisDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("analysisId")] string? AnalysisId,
+        [property: System.Text.Json.Serialization.JsonPropertyName("suggestions")] List<SuggestionItemDto>? Suggestions,
+        [property: System.Text.Json.Serialization.JsonPropertyName("totalBytes")] long TotalBytes,
+        [property: System.Text.Json.Serialization.JsonPropertyName("createdAt")] string? CreatedAt,
+        [property: System.Text.Json.Serialization.JsonPropertyName("scope")] string? Scope);
+
+    private sealed record SuggestionItemDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("filePath")] string? FilePath,
+        [property: System.Text.Json.Serialization.JsonPropertyName("sizeBytes")] long SizeBytes,
+        [property: System.Text.Json.Serialization.JsonPropertyName("category")] string? Category,
+        [property: System.Text.Json.Serialization.JsonPropertyName("safeToDelete")] bool SafeToDelete,
+        [property: System.Text.Json.Serialization.JsonPropertyName("reason")] string? Reason);
+
+    private sealed record CleanupResultDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("filesDeleted")] int FilesDeleted,
+        [property: System.Text.Json.Serialization.JsonPropertyName("bytesFreed")] long BytesFreed);
+
+    private sealed record AutoCleanResultDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("success")] bool Success,
+        [property: System.Text.Json.Serialization.JsonPropertyName("autoCleanedCount")] int AutoCleanedCount,
+        [property: System.Text.Json.Serialization.JsonPropertyName("autoCleanedPaths")] List<string>? AutoCleanedPaths,
+        [property: System.Text.Json.Serialization.JsonPropertyName("skippedCount")] int SkippedCount,
+        [property: System.Text.Json.Serialization.JsonPropertyName("bytesFreed")] long BytesFreed,
+        [property: System.Text.Json.Serialization.JsonPropertyName("message")] string? Message);
+}

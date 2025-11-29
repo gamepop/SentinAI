@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(powershell:*)",
+      "Bash(dotnet build:*)",
+      "Bash(\"C:\\Users\\pras_\\.nuget\\packages\\microsoft.windowsappsdk\\1.6.240923002\\tools\\net472\\XamlCompiler.exe\" \"input.json\" \"output.json\")",
+      "Bash(dotnet new:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

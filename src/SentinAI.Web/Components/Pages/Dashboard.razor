@@ -1,0 +1,950 @@
+@page "/dashboard"
+@using SentinAI.Shared
+@using SentinAI.Shared.Models
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Net.Http
+@using System.Net.Http.Json
+@using System.Linq
+@inject AgentService.AgentServiceClient? SentinelClient
+@inject NavigationManager Navigation
+@inject IHttpClientFactory HttpClientFactory
+@implements IAsyncDisposable
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard - SentinAI</PageTitle>
+
+<h1>SentinAI Dashboard</h1>
+
+@* Pending Cleanup Suggestions - TOP PRIORITY *@
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-3 @(pendingSuggestions?.Any() == true ? "border-warning" : "")">
+            <div class="card-header d-flex justify-content-between align-items-center @(pendingSuggestions?.Any() == true ? "bg-warning text-dark" : "")">
+                <div>
+                    <h5 class="mb-0">⚠️ Pending Cleanup Suggestions</h5>
+                    <small>Review and approve cleanup actions</small>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="LoadPendingSuggestionsAsync" disabled="@isLoadingSuggestions">
+                    <span class="oi oi-reload me-1"></span>Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                @if (!string.IsNullOrWhiteSpace(approvalMessage))
+                {
+                    <div class="alert @(approvalMessage.StartsWith("✅") ? "alert-success" : "alert-danger") alert-dismissible fade show" role="alert">
+                        @approvalMessage
+                        <button type="button" class="btn-close" @onclick="() => approvalMessage = null"></button>
+                    </div>
+                }
+                @if (isLoadingSuggestions)
+                {
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    <span class="ms-2">Loading suggestions...</span>
+                }
+                else if (pendingSuggestions == null || !pendingSuggestions.Any())
+                {
+                    <p class="text-muted mb-0">✅ No pending cleanup suggestions at this time.</p>
+                }
+                else
+                {
+                    <div class="alert alert-warning mb-3">
+                        <strong>🔔 @pendingSuggestions.Count analysis session(s)</strong> awaiting your review. Click <strong>Approve</strong> to execute cleanup or <strong>Reject</strong> to dismiss.
+                    </div>
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Analysis ID</th>
+                                <th>Scope</th>
+                                <th>Suggestions</th>
+                                <th>Size</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var analysis in pendingSuggestions)
+                            {
+                                <tr>
+                                    <td><code>@(analysis.Id.Length > 8 ? analysis.Id.Substring(0, 8) : analysis.Id)...</code></td>
+                                    <td>@(!string.IsNullOrEmpty(analysis.Scope) ? analysis.Scope : "System")</td>
+                                    <td>
+                                        <span class="badge bg-info">@analysis.Suggestions.Count item(s)</span>
+                                    </td>
+                                    <td>@FormatBytes(analysis.TotalBytes)</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-success me-2" @onclick="() => ApproveAnalysis(analysis.Id)" disabled="@isApprovingAnalysis">
+                                            <span class="oi oi-check"></span> Approve
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RejectAnalysis(analysis.Id)">
+                                            <span class="oi oi-x"></span> Reject
+                                        </button>
+                                    </td>
+                                </tr>
+                                @if (analysis.Suggestions.Any())
+                                {
+                                    <tr class="table-light">
+                                        <td colspan="5" class="ps-4">
+                                            <small class="text-muted">
+                                                <strong>Files:</strong>
+                                                @foreach (var item in analysis.Suggestions.Take(5))
+                                                {
+                                                    <span class="d-block">
+                                                        <code>@item.FilePath</code> 
+                                                        <span class="badge @(item.SafeToDelete ? "bg-success" : "bg-warning")">
+                                                            @(item.SafeToDelete ? "Safe" : "Review")
+                                                        </span>
+                                                        - @item.Reason
+                                                    </span>
+                                                }
+                                                @if (analysis.Suggestions.Count > 5)
+                                                {
+                                                    <span class="text-muted">...and @(analysis.Suggestions.Count - 5) more</span>
+                                                }
+                                            </small>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5>Service Status</h5>
+            </div>
+            <div class="card-body">
+                @if (serviceStatus == null)
+                {
+                    <p><em>Loading status...</em></p>
+                }
+                else
+                {
+                    <div class="row">
+                        <div class="col-md-3">
+                            <strong>Status:</strong>
+                            @if (serviceStatus.IsRunning)
+                            {
+                                <span class="badge bg-success">Running</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-danger">Stopped</span>
+                            }
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Monitoring:</strong>
+                            @if (serviceStatus.IsMonitoring)
+                            {
+                                <span class="badge bg-success">Active</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Inactive</span>
+                            }
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Uptime:</strong> @FormatUptime(serviceStatus.UptimeSeconds)
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Pending:</strong> @serviceStatus.PendingAnalyses analysis(es)
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Brain Status Card *@
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-3 @(brainStatus?.IsModelLoaded == true ? "border-success" : "border-warning")">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">🧠 Brain Status</h5>
+                <div>
+                    <a href="/brain-memory" class="btn btn-sm btn-outline-info me-2">
+                        <span class="oi oi-lightbulb"></span> View Memory
+                    </a>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="LoadBrainStatusAsync">
+                        <span class="oi oi-reload"></span>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                @if (brainStatus == null)
+                {
+                    <p class="text-muted"><em>Loading brain status...</em></p>
+                }
+                else
+                {
+                    <div class="row">
+                        <div class="col-md-3">
+                            <strong>Mode:</strong>
+                            @if (brainStatus.IsModelLoaded)
+                            {
+                                <span class="badge bg-success">🤖 AI + Heuristics</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning text-dark">📊 Heuristics Only</span>
+                            }
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Model:</strong>
+                            @if (brainStatus.ModelDownloaded)
+                            {
+                                <span class="badge bg-success">Downloaded</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-danger">Not Downloaded</span>
+                            }
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Total Analyses:</strong> @brainStatus.Statistics.TotalAnalyses
+                        </div>
+                        <div class="col-md-3">
+                            <strong>AI Decisions:</strong> @brainStatus.Statistics.ModelDecisions
+                            <span class="text-muted">/ @brainStatus.Statistics.HeuristicOnly heuristic</span>
+                        </div>
+                    </div>
+                    @if (!brainStatus.IsModelLoaded && brainStatus.ModelDownloaded)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0">
+                            <strong>⚠️ Model downloaded but not loaded!</strong> 
+                            The Phi-3 model files exist but failed to load. Check the console logs for errors.
+                            Try clicking "Force Model Re-download" below to reload.
+                        </div>
+                    }
+                    @if (!brainStatus.ModelDownloaded)
+                    {
+                        <div class="alert alert-info mt-3 mb-0">
+                            <strong>ℹ️ Model not downloaded.</strong> 
+                            Click "Force Model Re-download" below to download the Phi-3 model (~2.5GB).
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-0">Monitoring Activity</h5>
+                    <small class="text-muted">Drive sweeps, USN batches, and orchestrator state transitions</small>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="badge @GetMonitoringConnectionBadge()">@monitoringConnectionStatus</span>
+                    @if (lastActivityRefresh.HasValue)
+                    {
+                        <small class="text-muted">Updated @lastActivityRefresh.Value.ToLocalTime().ToString("t")</small>
+                    }
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshActivityAsync" disabled="@isLoadingActivity">
+                        <span class="oi oi-reload me-1"></span>
+                        @(isLoadingActivity ? "Refreshing..." : "Refresh")
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                @if (!string.IsNullOrWhiteSpace(monitoringError))
+                {
+                    <div class="alert alert-danger" role="alert">
+                        @monitoringError
+                    </div>
+                }
+                else if (isLoadingActivity)
+                {
+                    <div class="text-muted">
+                        <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                        Loading recent activity...
+                    </div>
+                }
+                else if (!monitoringFeed.Any())
+                {
+                    <p class="text-muted mb-0">
+                        No monitoring activity has been recorded yet. Once the Sentinel begins scanning and orchestrating cleanups, the live timeline will appear here.
+                    </p>
+                }
+                else
+                {
+                    <div class="monitoring-activity-list" style="max-height: 28rem; overflow-y: auto;">
+                        @foreach (var activity in monitoringFeed.Take(50))
+                        {
+                            <div class="activity-entry py-2 border-bottom">
+                                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                    <div class="d-flex align-items-center flex-wrap gap-2">
+                                        <span class="badge @GetActivityBadgeClass(activity.Type) text-uppercase small fw-semibold">
+                                            <span class="oi @GetActivityIcon(activity.Type) me-1"></span>
+                                            @activity.Type
+                                        </span>
+                                        <strong>@(activity.Message ?? "No message provided")</strong>
+                                    </div>
+                                    <small class="text-muted">@FormatActivityTime(activity.Timestamp)</small>
+                                </div>
+                                <div class="text-muted small mt-1">
+                                    <span>@(string.IsNullOrWhiteSpace(activity.Scope) ? "General" : activity.Scope)</span>
+                                    @if (!string.IsNullOrWhiteSpace(activity.Drive))
+                                    {
+                                        <span class="ms-2">Drive: <code>@activity.Drive</code></span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(activity.State))
+                                    {
+                                        <span class="ms-2">State: <code>@activity.State</code></span>
+                                    }
+                                </div>
+                                @if (activity.Metadata != null && activity.Metadata.Count > 0)
+                                {
+                                    <div class="mt-1 small text-wrap">
+                                        @foreach (var kv in activity.Metadata.Take(4))
+                                        {
+                                            <span class="badge text-bg-light me-1">@kv.Key: @kv.Value</span>
+                                        }
+                                        @if (activity.Metadata.Count > 4)
+                                        {
+                                            <span class="badge text-bg-light">+@(activity.Metadata.Count - 4) more</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    @if (!isMonitoringStreamConnected)
+                    {
+                        <small class="text-muted">Live stream paused. Reconnects automatically when the SignalR hub is reachable.</small>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-0">🔍 Analyze Now</h5>
+                    <small class="text-muted">Trigger on-demand system analysis</small>
+                </div>
+            </div>
+            <div class="card-body">
+                @if (!string.IsNullOrWhiteSpace(analyzeNowMessage))
+                {
+                    <div class="alert @analyzeNowAlertClass" role="alert">
+                        @analyzeNowMessage
+                    </div>
+                }
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-6">
+                        <label class="form-label">Custom Folder Path (optional)</label>
+                        <input type="text" class="form-control" @bind="customFolderPath" placeholder="e.g., C:\Users\YourName\Downloads" />
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-primary w-100" @onclick="TriggerSystemScan" disabled="@isAnalyzing">
+                            @if (isAnalyzing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                <span>Analyzing...</span>
+                            }
+                            else
+                            {
+                                <span class="oi oi-magnifying-glass me-1"></span>
+                                <span>Full System Scan</span>
+                            }
+                        </button>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-outline-primary w-100" @onclick="TriggerFolderScan" disabled="@(isAnalyzing || string.IsNullOrWhiteSpace(customFolderPath))">
+                            <span class="oi oi-folder me-1"></span>
+                            Scan Folder
+                        </button>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <small class="text-muted">
+                        <strong>Full System Scan</strong> checks Windows Temp, User Temp, browser caches, and Downloads folder.
+                        <strong>Scan Folder</strong> analyzes the specified folder for cleanup opportunities.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Model Operations</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">Need to pull the latest Phi-3 checkpoint? Trigger a fresh download and Brain re-initialization without touching the command line.</p>
+                @if (!string.IsNullOrWhiteSpace(modelRefreshMessage))
+                {
+                    <div class="alert @modelRefreshAlertClass" role="alert">
+                        @modelRefreshMessage
+                    </div>
+                }
+                <button class="btn btn-outline-primary" @onclick="ForceModelRefresh" disabled="@isRefreshingModel">
+                    @if (isRefreshingModel)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                        <span>Refreshing model...</span>
+                    }
+                    else
+                    {
+                        <span class="oi oi-cloud-download me-1"></span>
+                        <span>Force Model Re-download</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-md-12 text-center">
+        <button class="btn btn-primary" @onclick="RefreshStatus">
+            <span class="oi oi-reload"></span> Refresh Status
+        </button>
+    </div>
+</div>
+
+@code {
+    private ServiceStatus? serviceStatus;
+    private BrainStatusDto? brainStatus;
+    private List<PendingAnalysisDto>? pendingSuggestions = new();
+    private bool isLoadingSuggestions;
+    private bool isApprovingAnalysis;
+    private string? approvalMessage;
+    private bool isRefreshingModel;
+    private string? modelRefreshMessage;
+    private string modelRefreshAlertClass = "alert-info";
+
+    // Analyze Now state
+    private bool isAnalyzing;
+    private string? analyzeNowMessage;
+    private string analyzeNowAlertClass = "alert-info";
+    private string? customFolderPath;
+
+    private readonly List<MonitoringActivity> monitoringFeed = new();
+    private readonly HashSet<string> knownActivityIds = new(StringComparer.OrdinalIgnoreCase);
+    private bool isLoadingActivity = true;
+    private bool isMonitoringStreamConnected;
+    private string monitoringConnectionStatus = "Connecting...";
+    private string? monitoringError;
+    private HubConnection? monitoringHubConnection;
+    private DateTimeOffset? lastActivityRefresh;
+    private const int MaxActivityItems = 200;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadStatus();
+        await LoadBrainStatusAsync();
+        await LoadPendingSuggestionsAsync();
+        await InitializeMonitoringPanelAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (monitoringHubConnection is not null)
+        {
+            await monitoringHubConnection.DisposeAsync();
+        }
+    }
+
+    private async Task InitializeMonitoringPanelAsync()
+    {
+        await LoadRecentActivityAsync();
+        await StartMonitoringHubAsync();
+    }
+
+    private async Task LoadStatus()
+    {
+        if (SentinelClient != null)
+        {
+            try
+            {
+                var request = new StatusRequest { Detailed = true };
+                serviceStatus = await SentinelClient.GetServiceStatusAsync(request);
+            }
+            catch (Exception)
+            {
+                serviceStatus = null;
+            }
+        }
+    }
+
+    private async Task RefreshStatus()
+    {
+        await LoadStatus();
+        await LoadBrainStatusAsync();
+    }
+
+    private async Task LoadBrainStatusAsync()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            brainStatus = await httpClient.GetFromJsonAsync<BrainStatusDto>("api/brain/status");
+        }
+        catch (Exception)
+        {
+            brainStatus = null;
+        }
+    }
+
+    private async Task TriggerSystemScan()
+    {
+        await TriggerAnalysis(fullSystemScan: true, folderPaths: null);
+    }
+
+    private async Task TriggerFolderScan()
+    {
+        if (string.IsNullOrWhiteSpace(customFolderPath))
+        {
+            analyzeNowMessage = "Please enter a folder path.";
+            analyzeNowAlertClass = "alert-warning";
+            return;
+        }
+
+        await TriggerAnalysis(fullSystemScan: false, folderPaths: new List<string> { customFolderPath.Trim() });
+    }
+
+    private async Task TriggerAnalysis(bool fullSystemScan, List<string>? folderPaths)
+    {
+        isAnalyzing = true;
+        analyzeNowMessage = null;
+        analyzeNowAlertClass = "alert-info";
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+
+            var request = new
+            {
+                FullSystemScan = fullSystemScan,
+                FolderPaths = folderPaths,
+                Reason = fullSystemScan ? "Full system scan from Dashboard" : $"Folder scan: {folderPaths?.FirstOrDefault()}"
+            };
+
+            var response = await httpClient.PostAsJsonAsync("api/agent/analyze", request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<AnalyzeResponse>();
+                if (result?.Accepted == true)
+                {
+                    analyzeNowMessage = $"✅ Analysis started! {result.FoldersQueued} folder(s) queued. Analysis ID: {result.AnalysisId?[..8]}...";
+                    analyzeNowAlertClass = "alert-success";
+                    
+                    // Refresh activity feed and suggestions after a short delay
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(3000);
+                        await InvokeAsync(async () =>
+                        {
+                            await RefreshActivityAsync();
+                            await LoadPendingSuggestionsAsync();
+                            StateHasChanged();
+                        });
+                    });
+                }
+                else
+                {
+                    analyzeNowMessage = $"⚠️ Analysis not started: {result?.Message ?? "Unknown reason"}";
+                    analyzeNowAlertClass = "alert-warning";
+                }
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                analyzeNowMessage = $"❌ Analysis failed ({response.StatusCode}): {error}";
+                analyzeNowAlertClass = "alert-danger";
+            }
+        }
+        catch (Exception ex)
+        {
+            analyzeNowMessage = $"❌ Analysis failed: {ex.Message}";
+            analyzeNowAlertClass = "alert-danger";
+        }
+        finally
+        {
+            isAnalyzing = false;
+        }
+    }
+
+    private async Task LoadRecentActivityAsync()
+    {
+        isLoadingActivity = true;
+        monitoringError = null;
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient();
+            client.BaseAddress ??= new Uri(Navigation.BaseUri);
+            var response = await client.GetFromJsonAsync<List<MonitoringActivity>>("api/monitoring/activity?limit=100");
+
+            monitoringFeed.Clear();
+            knownActivityIds.Clear();
+
+            if (response is not null)
+            {
+                var ordered = response
+                    .OrderByDescending(a => a.Timestamp)
+                    .Take(MaxActivityItems)
+                    .ToList();
+
+                monitoringFeed.AddRange(ordered);
+                foreach (var activity in ordered)
+                {
+                    knownActivityIds.Add(activity.Id);
+                }
+            }
+
+            lastActivityRefresh = DateTimeOffset.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            monitoringError = $"Failed to load activity: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingActivity = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task StartMonitoringHubAsync()
+    {
+        monitoringHubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/hubs/agent"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        monitoringHubConnection.On<List<MonitoringActivity>>("MonitoringActivityBatch", batch =>
+        {
+            if (batch is null || batch.Count == 0)
+            {
+                return;
+            }
+
+            _ = InvokeAsync(() =>
+            {
+                MergeActivityBatch(batch);
+                StateHasChanged();
+            });
+        });
+
+        monitoringHubConnection.Reconnecting += error =>
+        {
+            isMonitoringStreamConnected = false;
+            monitoringConnectionStatus = "Reconnecting...";
+            if (error != null)
+            {
+                monitoringError = $"Realtime stream interrupted: {error.Message}";
+            }
+            return InvokeAsync(StateHasChanged);
+        };
+
+        monitoringHubConnection.Reconnected += async _ =>
+        {
+            monitoringError = null;
+            isMonitoringStreamConnected = true;
+            monitoringConnectionStatus = "Live";
+            await monitoringHubConnection.SendAsync("SubscribeToMonitoring");
+            await InvokeAsync(StateHasChanged);
+        };
+
+        monitoringHubConnection.Closed += error =>
+        {
+            isMonitoringStreamConnected = false;
+            monitoringConnectionStatus = "Offline";
+            if (error != null)
+            {
+                monitoringError = $"Realtime stream closed: {error.Message}";
+            }
+            return InvokeAsync(StateHasChanged);
+        };
+
+        try
+        {
+            await monitoringHubConnection.StartAsync();
+            await monitoringHubConnection.SendAsync("SubscribeToMonitoring");
+            isMonitoringStreamConnected = true;
+            monitoringConnectionStatus = "Live";
+            monitoringError = null;
+        }
+        catch (Exception ex)
+        {
+            monitoringError = $"Realtime connection failed: {ex.Message}";
+            isMonitoringStreamConnected = false;
+            monitoringConnectionStatus = "Offline";
+        }
+    }
+
+    private void MergeActivityBatch(IEnumerable<MonitoringActivity> batch)
+    {
+        var ordered = batch
+            .OrderByDescending(a => a.Timestamp)
+            .Take(MaxActivityItems)
+            .ToList();
+
+        foreach (var activity in ordered)
+        {
+            if (!knownActivityIds.Add(activity.Id))
+            {
+                continue;
+            }
+
+            monitoringFeed.Insert(0, activity);
+        }
+
+        if (monitoringFeed.Count > MaxActivityItems)
+        {
+            monitoringFeed.RemoveRange(MaxActivityItems, monitoringFeed.Count - MaxActivityItems);
+        }
+
+        lastActivityRefresh = DateTimeOffset.UtcNow;
+    }
+
+    private async Task RefreshActivityAsync()
+    {
+        await LoadRecentActivityAsync();
+    }
+
+    private async Task ApproveAnalysis(string analysisId)
+    {
+        isApprovingAnalysis = true;
+        approvalMessage = null;
+        
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            var response = await httpClient.PostAsync($"api/agent/approve/{analysisId}", null);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<ApproveResponse>();
+                approvalMessage = $"✅ Cleanup executed: {result?.FilesDeleted ?? 0} files deleted, {FormatBytes(result?.BytesFreed ?? 0)} freed!";
+                
+                // Refresh the pending suggestions list
+                await LoadPendingSuggestionsAsync();
+                await RefreshActivityAsync();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                approvalMessage = $"❌ Approval failed: {error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            approvalMessage = $"❌ Approval failed: {ex.Message}";
+        }
+        finally
+        {
+            isApprovingAnalysis = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RejectAnalysis(string analysisId)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            
+            await httpClient.PostAsync($"api/agent/reject/{analysisId}", null);
+            
+            // Remove from local list
+            pendingSuggestions = pendingSuggestions?.Where(a => a.Id != analysisId).ToList();
+        }
+        catch (Exception)
+        {
+            // Silently fail for now
+        }
+        
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ForceModelRefresh()
+    {
+        isRefreshingModel = true;
+        modelRefreshMessage = null;
+        modelRefreshAlertClass = "alert-info";
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            var response = await httpClient.PostAsync("api/brain/refresh-model", null);
+            if (response.IsSuccessStatusCode)
+            {
+                var payload = await response.Content.ReadFromJsonAsync<ModelRefreshResponse>();
+                modelRefreshMessage = payload is not null
+                    ? $"Model refreshed successfully. Brain initialized: {payload.Initialized}."
+                    : "Model refreshed successfully.";
+                modelRefreshAlertClass = "alert-success";
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                modelRefreshMessage = $"Refresh failed ({response.StatusCode}): {error}";
+                modelRefreshAlertClass = "alert-danger";
+            }
+        }
+        catch (Exception ex)
+        {
+            modelRefreshMessage = $"Refresh failed: {ex.Message}";
+            modelRefreshAlertClass = "alert-danger";
+        }
+        finally
+        {
+            isRefreshingModel = false;
+        }
+    }
+
+    private string FormatUptime(long seconds)
+    {
+        var timespan = TimeSpan.FromSeconds(seconds);
+        if (timespan.TotalDays >= 1)
+            return $"{(int)timespan.TotalDays}d {timespan.Hours}h";
+        if (timespan.TotalHours >= 1)
+            return $"{(int)timespan.TotalHours}h {timespan.Minutes}m";
+        return $"{(int)timespan.TotalMinutes}m";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    private string FormatActivityTime(DateTimeOffset timestamp)
+    {
+        var local = timestamp.ToLocalTime();
+        var delta = DateTimeOffset.UtcNow - timestamp;
+        string relative;
+        if (delta.TotalSeconds < 60)
+            relative = $"{Math.Max(1, (int)delta.TotalSeconds)}s ago";
+        else if (delta.TotalMinutes < 60)
+            relative = $"{Math.Max(1, (int)delta.TotalMinutes)}m ago";
+        else if (delta.TotalHours < 24)
+            relative = $"{Math.Max(1, (int)delta.TotalHours)}h ago";
+        else
+            relative = $"{Math.Max(1, (int)delta.TotalDays)}d ago";
+
+        return $"{local:t} ({relative})";
+    }
+
+    private static string GetActivityBadgeClass(MonitoringActivityType type)
+    {
+        return type switch
+        {
+            MonitoringActivityType.DriveSweep => "bg-primary",
+            MonitoringActivityType.UsnBatch => "bg-info",
+            MonitoringActivityType.StateTransition => "bg-secondary",
+            MonitoringActivityType.CleanupAnalysis => "bg-warning",
+            _ => "bg-secondary"
+        };
+    }
+
+    private static string GetActivityIcon(MonitoringActivityType type)
+    {
+        return type switch
+        {
+            MonitoringActivityType.DriveSweep => "oi-target",
+            MonitoringActivityType.UsnBatch => "oi-data-transfer-download",
+            MonitoringActivityType.StateTransition => "oi-random",
+            MonitoringActivityType.CleanupAnalysis => "oi-wrench",
+            _ => "oi-flash"
+        };
+    }
+
+    private string GetMonitoringConnectionBadge()
+    {
+        return isMonitoringStreamConnected ? "bg-success" : "bg-secondary";
+    }
+
+    private sealed record ModelRefreshResponse(bool Initialized, string ModelPath);
+
+    private sealed record AnalyzeResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("accepted")] bool Accepted, 
+        [property: System.Text.Json.Serialization.JsonPropertyName("analysisId")] string? AnalysisId, 
+        [property: System.Text.Json.Serialization.JsonPropertyName("foldersQueued")] int FoldersQueued, 
+        [property: System.Text.Json.Serialization.JsonPropertyName("message")] string? Message);
+
+    private sealed record PendingSuggestionsResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("analyses")] List<PendingAnalysisDto> Analyses);
+
+    private sealed record PendingAnalysisDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("analysisId")] string Id,
+        [property: System.Text.Json.Serialization.JsonPropertyName("suggestions")] List<CleanupItemDto> Suggestions,
+        [property: System.Text.Json.Serialization.JsonPropertyName("totalBytes")] long TotalBytes,
+        [property: System.Text.Json.Serialization.JsonPropertyName("createdAt")] string CreatedAt,
+        [property: System.Text.Json.Serialization.JsonPropertyName("scope")] string Scope);
+
+    private sealed record CleanupItemDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("filePath")] string FilePath,
+        [property: System.Text.Json.Serialization.JsonPropertyName("sizeBytes")] long SizeBytes,
+        [property: System.Text.Json.Serialization.JsonPropertyName("category")] string Category,
+        [property: System.Text.Json.Serialization.JsonPropertyName("safeToDelete")] bool SafeToDelete,
+        [property: System.Text.Json.Serialization.JsonPropertyName("reason")] string Reason,
+        [property: System.Text.Json.Serialization.JsonPropertyName("autoApprove")] bool AutoApprove);
+
+    private sealed record ApproveResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("filesDeleted")] int FilesDeleted,
+        [property: System.Text.Json.Serialization.JsonPropertyName("bytesFreed")] long BytesFreed);
+
+    private sealed record BrainStatusDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("isReady")] bool IsReady,
+        [property: System.Text.Json.Serialization.JsonPropertyName("isModelLoaded")] bool IsModelLoaded,
+        [property: System.Text.Json.Serialization.JsonPropertyName("mode")] string Mode,
+        [property: System.Text.Json.Serialization.JsonPropertyName("modelPath")] string ModelPath,
+        [property: System.Text.Json.Serialization.JsonPropertyName("modelDownloaded")] bool ModelDownloaded,
+        [property: System.Text.Json.Serialization.JsonPropertyName("statistics")] BrainStatsDto Statistics);
+
+    private sealed record BrainStatsDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("totalAnalyses")] int TotalAnalyses,
+        [property: System.Text.Json.Serialization.JsonPropertyName("modelDecisions")] int ModelDecisions,
+        [property: System.Text.Json.Serialization.JsonPropertyName("heuristicOnly")] int HeuristicOnly,
+        [property: System.Text.Json.Serialization.JsonPropertyName("safeToDeleteCount")] int SafeToDeleteCount);
+
+    private async Task LoadPendingSuggestionsAsync()
+    {
+        isLoadingSuggestions = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            httpClient.BaseAddress ??= new Uri(Navigation.BaseUri);
+            var response = await httpClient.GetFromJsonAsync<PendingSuggestionsResponse>("api/agent/suggestions");
+            pendingSuggestions = response?.Analyses ?? new List<PendingAnalysisDto>();
+        }
+        catch (Exception)
+        {
+            pendingSuggestions = new List<PendingAnalysisDto>();
+        }
+        finally
+        {
+            isLoadingSuggestions = false;
+        }
+    }
+}

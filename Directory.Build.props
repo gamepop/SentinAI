@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <!-- Common properties for all projects -->
+    <!-- Each project specifies its own TargetFramework(s) -->
+    <Platforms>x64;arm64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <Company>SentinAI</Company>
+    <Copyright>Copyright © 2025 SentinAI</Copyright>
+    <!-- Enable newer C# features -->
+    <EnablePreviewFeatures>false</EnablePreviewFeatures>
+    <AnalysisLevel>latest</AnalysisLevel>
+  </PropertyGroup>
+</Project>
