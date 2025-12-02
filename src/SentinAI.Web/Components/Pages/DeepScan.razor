@@ -1,0 +1,547 @@
+@page "/deep-scan"
+@using SentinAI.Shared.Models.DeepScan
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<PageTitle>Deep Scan - SentinAI</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="display-6">
+                <i class="bi bi-search text-primary"></i> Deep Scan
+            </h1>
+            <p class="text-muted">Comprehensive analysis of your system to find space-saving opportunities with AI recommendations.</p>
+        </div>
+    </div>
+
+    @if (_session == null)
+    {
+        <!-- Start Scan Section -->
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body p-4">
+                        <h5 class="card-title mb-4">
+                            <i class="bi bi-gear-wide-connected text-primary"></i> Scan Configuration
+                        </h5>
+                        
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Target Drives</label>
+                            <div class="d-flex flex-wrap gap-2">
+                                @foreach (var drive in _availableDrives)
+                                {
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" 
+                                               id="drive-@drive.Letter" 
+                                               checked="@_options.TargetDrives.Contains(drive.Letter + "\\")"
+                                               @onchange="@(e => ToggleDrive(drive.Letter, (bool)e.Value!))" />
+                                        <label class="form-check-label" for="drive-@drive.Letter">
+                                            @drive.Letter: @drive.Label (@drive.FreeSpaceFormatted free)
+                                        </label>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="scanApps" @bind="_options.ScanInstalledApps" />
+                                    <label class="form-check-label" for="scanApps">Scan installed applications</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="scanDuplicates" @bind="_options.ScanForDuplicates" />
+                                    <label class="form-check-label" for="scanDuplicates">Find duplicate files</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="includeHidden" @bind="_options.IncludeHiddenFiles" />
+                                    <label class="form-check-label" for="includeHidden">Include hidden files</label>
+                                </div>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="genRelocation" @bind="_options.GenerateRelocationPlans" />
+                                    <label class="form-check-label" for="genRelocation">Generate relocation plans</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary btn-lg" @onclick="StartScan" disabled="@_isStarting">
+                            @if (_isStarting)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            <i class="bi bi-play-fill me-2"></i> Start Deep Scan
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-4">
+                <div class="card border-0 shadow-sm bg-gradient-primary text-white">
+                    <div class="card-body p-4">
+                        <h5 class="card-title mb-3">
+                            <i class="bi bi-robot"></i> AI-Powered Analysis
+                        </h5>
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Smart app removal recommendations</li>
+                            <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> File relocation suggestions</li>
+                            <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Cache cleanup detection</li>
+                            <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Learns from your decisions</li>
+                            <li><i class="bi bi-check2-circle me-2"></i> Duplicate file detection</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                @if (_learningStats != null && _learningStats.TotalMemories > 0)
+                {
+                    <div class="card border-0 shadow-sm mt-3">
+                        <div class="card-body p-4">
+                            <h6 class="card-title mb-3">
+                                <i class="bi bi-graph-up-arrow text-success"></i> Learning Progress
+                            </h6>
+                            <div class="d-flex justify-content-between mb-2">
+                                <span class="text-muted">Total decisions learned:</span>
+                                <span class="fw-bold">@_learningStats.TotalMemories</span>
+                            </div>
+                            <div class="d-flex justify-content-between mb-2">
+                                <span class="text-muted">AI accuracy rate:</span>
+                                <span class="fw-bold text-success">@_learningStats.AiAccuracyRate.ToString("P0")</span>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Scan Progress / Results Section -->
+        <div class="row">
+            <div class="col-12">
+                @if (_session.State == DeepScanState.AwaitingApproval || _session.State == DeepScanState.Completed)
+                {
+                    <!-- Results Summary -->
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h5 class="card-title mb-0">
+                                    <i class="bi bi-clipboard-check text-success"></i> Scan Complete
+                                </h5>
+                                <button class="btn btn-outline-secondary" @onclick="ResetScan">
+                                    <i class="bi bi-arrow-counterclockwise me-1"></i> New Scan
+                                </button>
+                            </div>
+                            
+                            @if (_session.Summary != null)
+                            {
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-3">
+                                        <div class="text-center p-3 bg-light rounded">
+                                            <div class="display-6 text-primary">@_session.Summary.PotentialSpaceSavingsFormatted</div>
+                                            <small class="text-muted">Potential Savings</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="text-center p-3 bg-light rounded">
+                                            <div class="display-6 text-info">@_session.Summary.TotalRecommendations</div>
+                                            <small class="text-muted">Recommendations</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="text-center p-3 bg-light rounded">
+                                            <div class="display-6 text-warning">@_session.Summary.AppsRecommendedForRemoval</div>
+                                            <small class="text-muted">Apps to Review</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="text-center p-3 bg-light rounded">
+                                            <div class="display-6 text-danger">@_session.Summary.DuplicateGroupsFound</div>
+                                            <small class="text-muted">Duplicate Groups</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Recommendations Tabs -->
+                    <ul class="nav nav-tabs mb-4" role="tablist">
+                        <li class="nav-item">
+                            <button class="nav-link @(_activeTab == "apps" ? "active" : "")" @onclick="@(() => _activeTab = "apps")">
+                                <i class="bi bi-app-indicator me-1"></i> Apps (@(_session.AppRemovalRecommendations?.Count ?? 0))
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link @(_activeTab == "files" ? "active" : "")" @onclick="@(() => _activeTab = "files")">
+                                <i class="bi bi-folder-symlink me-1"></i> Relocate (@(_session.RelocationRecommendations?.Count ?? 0))
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link @(_activeTab == "cleanup" ? "active" : "")" @onclick="@(() => _activeTab = "cleanup")">
+                                <i class="bi bi-trash me-1"></i> Cleanup (@(_session.CleanupOpportunities?.Count ?? 0))
+                            </button>
+                        </li>
+                    </ul>
+                    
+                    @if (_activeTab == "apps")
+                    {
+                        <div class="row row-cols-1 row-cols-md-2 g-4">
+                            @foreach (var rec in _session.AppRemovalRecommendations ?? Enumerable.Empty<AppRemovalRecommendation>())
+                            {
+                                <div class="col">
+                                    <div class="card h-100 border-@(rec.ShouldRemove ? "warning" : "secondary")">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                                <h6 class="card-title mb-0">@rec.App?.Name</h6>
+                                                <span class="badge bg-@(GetCategoryColor(rec.Category))">@rec.Category</span>
+                                            </div>
+                                            <p class="text-muted small mb-2">@rec.App?.Publisher</p>
+                                            <p class="small mb-3">@rec.AiReason</p>
+                                            
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <span class="text-success fw-bold">@rec.TotalSavingsFormatted</span>
+                                                    <span class="text-muted small ms-2">@rec.ConfidenceFormatted confidence</span>
+                                                </div>
+                                                <div class="btn-group btn-group-sm">
+                                                    <button class="btn btn-outline-success" @onclick="@(() => ApproveApp(rec))">
+                                                        <i class="bi bi-check"></i>
+                                                    </button>
+                                                    <button class="btn btn-outline-danger" @onclick="@(() => RejectApp(rec))">
+                                                        <i class="bi bi-x"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            
+                                            @if (rec.LearnedFromPast)
+                                            {
+                                                <div class="mt-2">
+                                                    <small class="text-info"><i class="bi bi-lightbulb me-1"></i>@rec.LearnedInfluence</small>
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (_activeTab == "files")
+                    {
+                        <div class="list-group">
+                            @foreach (var rec in _session.RelocationRecommendations ?? Enumerable.Empty<RelocationRecommendation>())
+                            {
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">@rec.Cluster?.Name</h6>
+                                            <p class="mb-1 small text-muted">@rec.Cluster?.BasePath</p>
+                                            <p class="mb-2 small">@rec.AiReason</p>
+                                            <div class="d-flex gap-3">
+                                                <span><i class="bi bi-hdd me-1"></i>@rec.Cluster?.TotalSizeFormatted</span>
+                                                <span><i class="bi bi-file-earmark me-1"></i>@rec.Cluster?.FileCount files</span>
+                                                <span class="text-success"><i class="bi bi-arrow-right me-1"></i>Move to @rec.TargetDrive</span>
+                                            </div>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end">
+                                            <span class="badge bg-@(rec.Priority >= 4 ? "danger" : rec.Priority >= 3 ? "warning" : "info") mb-2">
+                                                @rec.PriorityLabel
+                                            </span>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-success" @onclick="@(() => ApproveRelocation(rec))">
+                                                    <i class="bi bi-check"></i> Move
+                                                </button>
+                                                <button class="btn btn-outline-secondary" @onclick="@(() => RejectRelocation(rec))">
+                                                    <i class="bi bi-x"></i> Skip
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (_activeTab == "cleanup")
+                    {
+                        <div class="row row-cols-1 row-cols-md-3 g-3">
+                            @foreach (var opp in _session.CleanupOpportunities ?? Enumerable.Empty<CleanupOpportunity>())
+                            {
+                                <div class="col">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                                <span class="badge" style="background-color: @opp.RiskColor">@opp.RiskLabel</span>
+                                                <span class="fw-bold text-success">@opp.BytesFormatted</span>
+                                            </div>
+                                            <h6 class="card-title">@opp.Type</h6>
+                                            <p class="card-text small text-muted">@opp.Description</p>
+                                            <div class="d-flex justify-content-between align-items-center mt-auto">
+                                                <small class="text-muted">@opp.FileCount files</small>
+                                                <div class="btn-group btn-group-sm">
+                                                    <button class="btn btn-success btn-sm" @onclick="@(() => ApproveCleanup(opp))">
+                                                        <i class="bi bi-trash"></i> Clean
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+                else
+                {
+                    <!-- Progress Display -->
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h5 class="card-title mb-0">
+                                    <span class="spinner-border spinner-border-sm text-primary me-2"></span>
+                                    @_session.Progress.CurrentPhase
+                                </h5>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="CancelScan">
+                                    <i class="bi bi-x-circle me-1"></i> Cancel
+                                </button>
+                            </div>
+                            
+                            <div class="progress mb-3" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     style="width: @_session.Progress.OverallProgress%">
+                                    @(_session.Progress.OverallProgress.ToString("F0"))%
+                                </div>
+                            </div>
+                            
+                            <div class="row g-3 text-center">
+                                <div class="col">
+                                    <div class="h4 mb-0">@_session.Progress.FilesScanned.ToString("N0")</div>
+                                    <small class="text-muted">Files Scanned</small>
+                                </div>
+                                <div class="col">
+                                    <div class="h4 mb-0">@FormatBytes(_session.Progress.BytesAnalyzed)</div>
+                                    <small class="text-muted">Bytes Analyzed</small>
+                                </div>
+                                <div class="col">
+                                    <div class="h4 mb-0">@_session.Progress.AppsDiscovered</div>
+                                    <small class="text-muted">Apps Found</small>
+                                </div>
+                                <div class="col">
+                                    <div class="h4 mb-0">@_session.Progress.RecommendationsGenerated</div>
+                                    <small class="text-muted">Recommendations</small>
+                                </div>
+                            </div>
+                            
+                            @if (!string.IsNullOrEmpty(_session.Progress.CurrentPath))
+                            {
+                                <div class="mt-3 text-truncate text-muted small">
+                                    <i class="bi bi-folder2-open me-1"></i> @_session.Progress.CurrentPath
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .bg-gradient-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+</style>
+
+@code {
+    private DeepScanSession? _session;
+    private DeepScanOptions _options = new();
+    private List<TargetDriveInfo> _availableDrives = new();
+    private DeepScanLearningStats? _learningStats;
+    private bool _isStarting;
+    private string _activeTab = "apps";
+    private System.Threading.Timer? _pollTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDrivesAsync();
+        await LoadLearningStatsAsync();
+    }
+
+    private async Task LoadDrivesAsync()
+    {
+        try
+        {
+            var response = await Http.GetFromJsonAsync<List<TargetDriveInfo>>("api/deepscan/drives");
+            _availableDrives = response ?? new();
+            
+            // Default to C: if available
+            if (_availableDrives.Any(d => d.Letter == "C"))
+            {
+                _options.TargetDrives = new List<string> { "C:\\" };
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load drives: {ex.Message}");
+        }
+    }
+
+    private async Task LoadLearningStatsAsync()
+    {
+        try
+        {
+            _learningStats = await Http.GetFromJsonAsync<DeepScanLearningStats>("api/deepscan/learning/stats");
+        }
+        catch { }
+    }
+
+    private void ToggleDrive(string letter, bool include)
+    {
+        var path = letter + ":\\";
+        if (include && !_options.TargetDrives.Contains(path))
+        {
+            _options.TargetDrives.Add(path);
+        }
+        else if (!include)
+        {
+            _options.TargetDrives.Remove(path);
+        }
+    }
+
+    private async Task StartScan()
+    {
+        _isStarting = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/deepscan/start", _options);
+            _session = await response.Content.ReadFromJsonAsync<DeepScanSession>();
+            
+            // Start polling for progress
+            _pollTimer = new System.Threading.Timer(async _ =>
+            {
+                await PollProgressAsync();
+            }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to start scan: {ex.Message}");
+        }
+        finally
+        {
+            _isStarting = false;
+        }
+    }
+
+    private async Task PollProgressAsync()
+    {
+        if (_session == null) return;
+        
+        try
+        {
+            var updatedSession = await Http.GetFromJsonAsync<DeepScanSession>($"api/deepscan/{_session.Id}");
+            if (updatedSession != null)
+            {
+                _session = updatedSession;
+                
+                // Stop polling if complete
+                if (_session.State == DeepScanState.AwaitingApproval || 
+                    _session.State == DeepScanState.Completed ||
+                    _session.State == DeepScanState.Failed ||
+                    _session.State == DeepScanState.Cancelled)
+                {
+                    _pollTimer?.Dispose();
+                    _pollTimer = null;
+                }
+                
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch { }
+    }
+
+    private async Task CancelScan()
+    {
+        if (_session == null) return;
+        
+        try
+        {
+            await Http.PostAsync($"api/deepscan/{_session.Id}/cancel", null);
+        }
+        catch { }
+    }
+
+    private void ResetScan()
+    {
+        _session = null;
+        _pollTimer?.Dispose();
+        _pollTimer = null;
+    }
+
+    private async Task ApproveApp(AppRemovalRecommendation rec)
+    {
+        await SubmitFeedback("feedback/app", new { Recommendation = rec, UserApproved = true });
+        rec.Status = RecommendationStatus.Approved;
+    }
+
+    private async Task RejectApp(AppRemovalRecommendation rec)
+    {
+        await SubmitFeedback("feedback/app", new { Recommendation = rec, UserApproved = false });
+        rec.Status = RecommendationStatus.Rejected;
+    }
+
+    private async Task ApproveRelocation(RelocationRecommendation rec)
+    {
+        await SubmitFeedback("feedback/relocation", new { Recommendation = rec, UserApproved = true });
+        rec.Status = RecommendationStatus.Approved;
+    }
+
+    private async Task RejectRelocation(RelocationRecommendation rec)
+    {
+        await SubmitFeedback("feedback/relocation", new { Recommendation = rec, UserApproved = false });
+        rec.Status = RecommendationStatus.Rejected;
+    }
+
+    private async Task ApproveCleanup(CleanupOpportunity opp)
+    {
+        await SubmitFeedback("feedback/cleanup", new { Opportunity = opp, UserApproved = true });
+        opp.Status = RecommendationStatus.Approved;
+    }
+
+    private async Task SubmitFeedback(string endpoint, object feedback)
+    {
+        try
+        {
+            await Http.PostAsJsonAsync($"api/deepscan/{endpoint}", feedback);
+        }
+        catch { }
+    }
+
+    private string GetCategoryColor(AppRemovalCategory category) => category switch
+    {
+        AppRemovalCategory.Bloatware => "danger",
+        AppRemovalCategory.Unused => "warning",
+        AppRemovalCategory.LargeUnused => "warning",
+        AppRemovalCategory.Redundant => "info",
+        AppRemovalCategory.Optional => "secondary",
+        _ => "success"
+    };
+
+    private string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+    }
+}

@@ -5,6 +5,7 @@ using SentinAI.Shared;
 using SentinAI.Web.Components;
 using SentinAI.Web.Hubs;
 using SentinAI.Web.Services;
+using SentinAI.Web.Services.DeepScan;
 using SentinAI.Web.Services.Rag;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -72,6 +73,16 @@ builder.Services.AddSingleton<IDuplicateFileService, DuplicateFileService>();
 builder.Services.AddSingleton<IScheduledCleanupService, ScheduledCleanupService>();
 builder.Services.AddHostedService(sp => (ScheduledCleanupService)sp.GetRequiredService<IScheduledCleanupService>());
 builder.Services.AddSingleton<IUsnJournalMonitorService, UsnJournalMonitorService>();
+
+// Add Deep Scan services
+builder.Services.AddSingleton<FileSystemScanner>();
+builder.Services.AddSingleton<AppDiscoveryService>();
+builder.Services.AddSingleton<DriveManagerService>();
+builder.Services.AddSingleton<SpaceAnalysisService>();
+builder.Services.AddSingleton<IDeepScanRagStore, InMemoryDeepScanRagStore>();
+builder.Services.AddSingleton<DeepScanBrainAnalyzer>();
+builder.Services.AddSingleton<DeepScanLearningService>();
+builder.Services.AddSingleton<DeepScanService>();
 
 // Add configuration manager
 builder.Services.AddSingleton<SentinAI.Shared.Services.IConfigurationManager, SentinAI.Shared.Services.ConfigurationManager>();
