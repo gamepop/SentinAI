@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using SentinAI.Shared.Models.DeepScan;
@@ -5,419 +7,285 @@ using SentinAI.Shared.Models.DeepScan;
 namespace SentinAI.Web.Services.DeepScan;
 
 /// <summary>
-/// Discovers installed applications from various sources.
+/// Service for discovering installed applications on the system.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public class AppDiscoveryService
 {
     private readonly ILogger<AppDiscoveryService> _logger;
-    
+
     public AppDiscoveryService(ILogger<AppDiscoveryService> logger)
     {
         _logger = logger;
     }
-    
+
     /// <summary>
-    /// Discovers all installed applications asynchronously.
+    /// Discovers all installed applications on the system.
     /// </summary>
-    public async IAsyncEnumerable<InstalledApp> DiscoverAppsAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    public async Task<List<InstalledApp>> DiscoverAppsAsync(CancellationToken ct = default)
     {
-        _logger.LogInformation("Starting application discovery");
-        
-        // Discover from Registry (traditional installers)
-        await foreach (var app in DiscoverFromRegistryAsync(ct))
-        {
-            yield return app;
-        }
-        
-        // Discover Microsoft Store apps
-        await foreach (var app in DiscoverStoreAppsAsync(ct))
-        {
-            yield return app;
-        }
-        
-        // Discover Steam games
-        await foreach (var app in DiscoverSteamGamesAsync(ct))
-        {
-            yield return app;
-        }
-    }
-    
-    private async IAsyncEnumerable<InstalledApp> DiscoverFromRegistryAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var registryPaths = new[]
-        {
-            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-            @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-        };
-        
-        foreach (var basePath in registryPaths)
-        {
-            ct.ThrowIfCancellationRequested();
-            
-            using var key = Registry.LocalMachine.OpenSubKey(basePath);
-            if (key == null) continue;
-            
-            foreach (var subKeyName in key.GetSubKeyNames())
-            {
-                ct.ThrowIfCancellationRequested();
-                
-                using var subKey = key.OpenSubKey(subKeyName);
-                if (subKey == null) continue;
-                
-                var displayName = subKey.GetValue("DisplayName") as string;
-                if (string.IsNullOrWhiteSpace(displayName)) continue;
-                
-                var app = new InstalledApp
-                {
-                    Id = subKeyName,
-                    Name = displayName,
-                    Publisher = subKey.GetValue("Publisher") as string ?? "",
-                    Version = subKey.GetValue("DisplayVersion") as string ?? "",
-                    InstallPath = subKey.GetValue("InstallLocation") as string ?? "",
-                    UninstallCommand = subKey.GetValue("UninstallString") as string,
-                    RegistryKey = $@"HKLM\{basePath}\{subKeyName}",
-                    Source = AppSource.Registry,
-                    IsSystemApp = IsSystemApp(displayName, subKey.GetValue("Publisher") as string)
-                };
-                
-                // Parse install date
-                var installDateStr = subKey.GetValue("InstallDate") as string;
-                if (DateTime.TryParseExact(installDateStr, "yyyyMMdd", null, 
-                    System.Globalization.DateTimeStyles.None, out var installDate))
-                {
-                    app.InstallDate = installDate;
-                }
-                
-                // Get size from registry
-                var estimatedSize = subKey.GetValue("EstimatedSize");
-                if (estimatedSize is int sizeKb)
-                {
-                    app.InstallSizeBytes = sizeKb * 1024L;
-                }
-                
-                // Categorize
-                CategorizeApp(app);
-                
-                // Check for bloatware
-                app.IsBloatware = IsBloatware(app);
-                
-                // Calculate actual sizes if install path exists
-                if (!string.IsNullOrEmpty(app.InstallPath) && Directory.Exists(app.InstallPath))
-                {
-                    await Task.Run(() => CalculateAppSizes(app), ct);
-                }
-                
-                yield return app;
-            }
-        }
-    }
-    
-    private async IAsyncEnumerable<InstalledApp> DiscoverStoreAppsAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        // Use PowerShell to get Store apps
-        var script = "Get-AppxPackage | Select-Object Name, Publisher, Version, InstallLocation, PackageFullName | ConvertTo-Json";
-        
         var apps = new List<InstalledApp>();
-        
+
         await Task.Run(() =>
         {
-            try
+            // Discover from Registry (traditional desktop apps)
+            apps.AddRange(DiscoverFromRegistry(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"));
+            apps.AddRange(DiscoverFromRegistry(@"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"));
+
+            // Discover Store apps
+            apps.AddRange(DiscoverStoreApps());
+        }, ct);
+
+        _logger.LogInformation("Discovered {Count} installed applications", apps.Count);
+        return apps;
+    }
+
+    private List<InstalledApp> DiscoverFromRegistry(string registryPath)
+    {
+        var apps = new List<InstalledApp>();
+
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(registryPath);
+            if (key == null) return apps;
+
+            foreach (var subKeyName in key.GetSubKeyNames())
             {
-                using var process = new System.Diagnostics.Process();
-                process.StartInfo = new System.Diagnostics.ProcessStartInfo
+                try
                 {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -Command \"{script}\"",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                
-                process.Start();
-                var output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(30000);
-                
-                if (!string.IsNullOrWhiteSpace(output))
-                {
-                    var jsonApps = System.Text.Json.JsonSerializer.Deserialize<List<StoreAppInfo>>(output);
-                    if (jsonApps != null)
+                    using var subKey = key.OpenSubKey(subKeyName);
+                    if (subKey == null) continue;
+
+                    var displayName = subKey.GetValue("DisplayName")?.ToString();
+                    if (string.IsNullOrWhiteSpace(displayName)) continue;
+
+                    // Skip system components
+                    var systemComponent = subKey.GetValue("SystemComponent");
+                    if (systemComponent != null && (int)systemComponent == 1) continue;
+
+                    var app = new InstalledApp
                     {
-                        foreach (var storeApp in jsonApps)
+                        Id = subKeyName,
+                        Name = displayName,
+                        Publisher = subKey.GetValue("Publisher")?.ToString() ?? "Unknown",
+                        Version = subKey.GetValue("DisplayVersion")?.ToString(),
+                        InstallLocation = subKey.GetValue("InstallLocation")?.ToString(),
+                        Source = AppSource.Desktop,
+                        CanUninstall = !string.IsNullOrEmpty(subKey.GetValue("UninstallString")?.ToString())
+                    };
+
+                    // Parse install date
+                    var installDateStr = subKey.GetValue("InstallDate")?.ToString();
+                    if (!string.IsNullOrEmpty(installDateStr) && DateTime.TryParseExact(installDateStr, "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out var installDate))
+                    {
+                        app.InstallDate = installDate;
+                    }
+
+                    // Get size
+                    var estimatedSize = subKey.GetValue("EstimatedSize");
+                    if (estimatedSize != null)
+                    {
+                        app.InstallSizeBytes = Convert.ToInt64(estimatedSize) * 1024; // KB to bytes
+                    }
+
+                    // Detect bloatware
+                    app.IsBloatware = IsBloatware(app);
+
+                    // Categorize
+                    app.Category = CategorizeApp(app);
+
+                    apps.Add(app);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error reading registry key {Key}", subKeyName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading registry path {Path}", registryPath);
+        }
+
+        return apps;
+    }
+
+    private List<InstalledApp> DiscoverStoreApps()
+    {
+        var apps = new List<InstalledApp>();
+
+        try
+        {
+            // Use PowerShell to get Store apps (safer than COM interop)
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -Command \"Get-AppxPackage | Select-Object Name, Publisher, InstallLocation, Version | ConvertTo-Json\"",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process == null) return apps;
+
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(5000);
+
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                // Parse JSON output
+                var packages = System.Text.Json.JsonSerializer.Deserialize<List<StoreAppInfo>>(output);
+                if (packages != null)
+                {
+                    foreach (var pkg in packages)
+                    {
+                        if (string.IsNullOrWhiteSpace(pkg.Name)) continue;
+
+                        // Skip framework packages
+                        if (pkg.Name.Contains(".NET") || pkg.Name.Contains("VCLibs") || pkg.Name.Contains("WindowsAppRuntime"))
+                            continue;
+
+                        var app = new InstalledApp
                         {
-                            if (string.IsNullOrEmpty(storeApp.Name)) continue;
-                            
-                            var app = new InstalledApp
+                            Id = pkg.Name ?? "",
+                            Name = GetFriendlyAppName(pkg.Name ?? ""),
+                            Publisher = CleanPublisher(pkg.Publisher ?? "Unknown"),
+                            Version = pkg.Version,
+                            InstallLocation = pkg.InstallLocation,
+                            Source = AppSource.MicrosoftStore,
+                            CanUninstall = !IsSystemStoreApp(pkg.Name ?? "")
+                        };
+
+                        // Get size from install location
+                        if (!string.IsNullOrEmpty(pkg.InstallLocation) && Directory.Exists(pkg.InstallLocation))
+                        {
+                            try
                             {
-                                Id = storeApp.PackageFullName ?? storeApp.Name,
-                                Name = GetFriendlyAppName(storeApp.Name),
-                                Publisher = storeApp.Publisher ?? "",
-                                Version = storeApp.Version ?? "",
-                                InstallPath = storeApp.InstallLocation ?? "",
-                                Source = AppSource.MicrosoftStore,
-                                IsSystemApp = storeApp.Name.StartsWith("Microsoft.Windows")
-                            };
-                            
-                            CategorizeApp(app);
-                            app.IsBloatware = IsBloatware(app);
-                            
-                            apps.Add(app);
+                                var dirInfo = new DirectoryInfo(pkg.InstallLocation);
+                                app.InstallSizeBytes = GetDirectorySize(dirInfo);
+                            }
+                            catch { }
                         }
+
+                        app.IsBloatware = IsBloatware(app);
+                        app.Category = CategorizeApp(app);
+                        app.IsSystemApp = IsSystemStoreApp(pkg.Name ?? "");
+
+                        apps.Add(app);
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to enumerate Store apps");
-            }
-        }, ct);
-        
-        foreach (var app in apps)
-        {
-            yield return app;
-        }
-    }
-    
-    private async IAsyncEnumerable<InstalledApp> DiscoverSteamGamesAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var steamPaths = new[]
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
-            @"C:\Steam",
-            @"D:\Steam",
-            @"D:\SteamLibrary"
-        };
-        
-        foreach (var steamPath in steamPaths)
-        {
-            ct.ThrowIfCancellationRequested();
-            
-            var steamAppsPath = Path.Combine(steamPath, "steamapps");
-            if (!Directory.Exists(steamAppsPath)) continue;
-            
-            var manifestFiles = Directory.GetFiles(steamAppsPath, "appmanifest_*.acf");
-            
-            foreach (var manifest in manifestFiles)
-            {
-                ct.ThrowIfCancellationRequested();
-                
-                var app = await ParseSteamManifestAsync(manifest, steamAppsPath, ct);
-                if (app != null)
-                {
-                    yield return app;
-                }
-            }
-        }
-    }
-    
-    private async Task<InstalledApp?> ParseSteamManifestAsync(
-        string manifestPath, 
-        string steamAppsPath,
-        CancellationToken ct)
-    {
-        try
-        {
-            var content = await File.ReadAllTextAsync(manifestPath, ct);
-            
-            // Simple ACF parser
-            var name = ExtractAcfValue(content, "name");
-            var installDir = ExtractAcfValue(content, "installdir");
-            var appId = ExtractAcfValue(content, "appid");
-            var sizeOnDisk = ExtractAcfValue(content, "SizeOnDisk");
-            
-            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(installDir))
-                return null;
-            
-            var fullPath = Path.Combine(steamAppsPath, "common", installDir);
-            
-            var app = new InstalledApp
-            {
-                Id = $"steam_{appId}",
-                Name = name,
-                Publisher = "Steam",
-                InstallPath = fullPath,
-                Source = AppSource.Steam,
-                Category = AppCategory.Gaming,
-                CanRelocate = true
-            };
-            
-            if (long.TryParse(sizeOnDisk, out var size))
-            {
-                app.InstallSizeBytes = size;
-            }
-            
-            // Get last accessed
-            if (Directory.Exists(fullPath))
-            {
-                app.LastAccessed = new DirectoryInfo(fullPath).LastAccessTime;
-            }
-            
-            return app;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to parse Steam manifest: {Path}", manifestPath);
-            return null;
+            _logger.LogError(ex, "Error discovering Store apps");
         }
+
+        return apps;
     }
-    
-    private string? ExtractAcfValue(string content, string key)
+
+    private static long GetDirectorySize(DirectoryInfo dir)
     {
-        var pattern = $"\"{key}\"\\s+\"([^\"]+)\"";
-        var match = System.Text.RegularExpressions.Regex.Match(content, pattern, 
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        return match.Success ? match.Groups[1].Value : null;
-    }
-    
-    private void CalculateAppSizes(InstalledApp app)
-    {
+        long size = 0;
         try
         {
-            if (Directory.Exists(app.InstallPath))
+            foreach (var file in dir.EnumerateFiles("*", SearchOption.AllDirectories))
             {
-                app.InstallSizeBytes = GetDirectorySize(app.InstallPath);
-                app.LastAccessed = new DirectoryInfo(app.InstallPath).LastAccessTime;
-            }
-            
-            // Find associated AppData folders
-            var appDataLocal = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var appDataRoaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            
-            // Common patterns for app data
-            var possibleNames = new[] { app.Name, app.Publisher, app.Name.Replace(" ", "") };
-            
-            foreach (var name in possibleNames.Where(n => !string.IsNullOrEmpty(n)))
-            {
-                var localPath = Path.Combine(appDataLocal, name);
-                if (Directory.Exists(localPath))
-                {
-                    app.DataFolders.Add(localPath);
-                    app.DataSizeBytes += GetDirectorySize(localPath);
-                }
-                
-                var roamingPath = Path.Combine(appDataRoaming, name);
-                if (Directory.Exists(roamingPath))
-                {
-                    app.DataFolders.Add(roamingPath);
-                    app.DataSizeBytes += GetDirectorySize(roamingPath);
-                }
-                
-                // Cache folders
-                var cachePath = Path.Combine(appDataLocal, name, "Cache");
-                if (Directory.Exists(cachePath))
-                {
-                    app.CacheFolders.Add(cachePath);
-                    app.CacheSizeBytes += GetDirectorySize(cachePath);
-                }
+                try { size += file.Length; } catch { }
             }
         }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Error calculating sizes for {App}", app.Name);
-        }
+        catch { }
+        return size;
     }
-    
-    private long GetDirectorySize(string path)
-    {
-        try
-        {
-            return Directory.EnumerateFiles(path, "*", new EnumerationOptions
-            {
-                IgnoreInaccessible = true,
-                RecurseSubdirectories = true
-            }).Sum(f => new FileInfo(f).Length);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-    
-    private void CategorizeApp(InstalledApp app)
-    {
-        var name = app.Name.ToLowerInvariant();
-        var publisher = app.Publisher.ToLowerInvariant();
-        
-        if (name.Contains("game") || publisher.Contains("games") || app.Source == AppSource.Steam)
-            app.Category = AppCategory.Gaming;
-        else if (name.Contains("visual studio") || name.Contains("vscode") || name.Contains("jetbrains"))
-            app.Category = AppCategory.Development;
-        else if (name.Contains("chrome") || name.Contains("firefox") || name.Contains("edge") || name.Contains("browser"))
-            app.Category = AppCategory.Browser;
-        else if (name.Contains("office") || name.Contains("word") || name.Contains("excel"))
-            app.Category = AppCategory.Productivity;
-        else if (name.Contains("discord") || name.Contains("slack") || name.Contains("teams") || name.Contains("zoom"))
-            app.Category = AppCategory.Communication;
-        else if (name.Contains("vlc") || name.Contains("spotify") || name.Contains("itunes"))
-            app.Category = AppCategory.Media;
-        else if (name.Contains("antivirus") || name.Contains("security") || name.Contains("defender"))
-            app.Category = AppCategory.Security;
-        else if (publisher.Contains("microsoft") && (name.Contains("windows") || name.Contains(".net")))
-            app.Category = AppCategory.System;
-        else
-            app.Category = AppCategory.Unknown;
-    }
-    
-    private bool IsBloatware(InstalledApp app)
-    {
-        foreach (var pattern in BloatwarePatterns.KnownBloatwarePatterns)
-        {
-            if (app.Name.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        
-        foreach (var publisher in BloatwarePatterns.KnownBloatwarePublishers)
-        {
-            if (app.Publisher.Contains(publisher, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        
-        return false;
-    }
-    
-    private bool IsSystemApp(string name, string? publisher)
-    {
-        if (string.IsNullOrEmpty(name)) return false;
-        
-        foreach (var essential in BloatwarePatterns.EssentialApps)
-        {
-            if (name.Contains(essential, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        
-        if (publisher?.Contains("Microsoft Corporation", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            if (name.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains(".NET", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("Visual C++", StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        
-        return false;
-    }
-    
-    private string GetFriendlyAppName(string packageName)
+
+    private static string GetFriendlyAppName(string packageName)
     {
         // Convert package names like "Microsoft.WindowsCalculator" to "Windows Calculator"
         var parts = packageName.Split('.');
         if (parts.Length > 1)
         {
-            var name = parts[^1];
-            // Add spaces before capital letters
+            var name = parts.Last();
+            // Add spaces before capitals
             return System.Text.RegularExpressions.Regex.Replace(name, "([a-z])([A-Z])", "$1 $2");
         }
         return packageName;
     }
-    
+
+    private static string CleanPublisher(string publisher)
+    {
+        // Clean up publisher strings like "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond..."
+        if (publisher.StartsWith("CN="))
+        {
+            var parts = publisher.Split(',');
+            return parts[0].Replace("CN=", "").Trim();
+        }
+        return publisher;
+    }
+
+    private static bool IsSystemStoreApp(string name)
+    {
+        var systemApps = new[]
+        {
+            "Microsoft.WindowsStore",
+            "Microsoft.Windows.Photos",
+            "Microsoft.WindowsCamera",
+            "Microsoft.WindowsCalculator",
+            "Microsoft.WindowsNotepad",
+            "Microsoft.Paint",
+            "Microsoft.ScreenSketch",
+            "windows.immersivecontrolpanel",
+            "Microsoft.AAD.BrokerPlugin",
+            "Microsoft.AccountsControl",
+            "Microsoft.Windows.CloudExperienceHost"
+        };
+
+        return systemApps.Any(s => name.Contains(s, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsBloatware(InstalledApp app)
+    {
+        var bloatwareNames = new[]
+        {
+            "Candy", "Solitaire", "Bubble", "Farm", "Hidden City",
+            "Disney", "Spotify", "Netflix", "TikTok", "Facebook",
+            "LinkedIn", "Twitter", "Instagram", "Clipchamp",
+            "McAfee", "Norton", "ExpressVPN", "Avast"
+        };
+
+        return bloatwareNames.Any(b =>
+            app.Name.Contains(b, StringComparison.OrdinalIgnoreCase) ||
+            app.Publisher.Contains(b, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static AppCategory CategorizeApp(InstalledApp app)
+    {
+        var name = app.Name.ToLowerInvariant();
+        var publisher = app.Publisher.ToLowerInvariant();
+
+        if (name.Contains("game") || name.Contains("xbox") || publisher.Contains("game"))
+            return AppCategory.Gaming;
+        if (name.Contains("visual studio") || name.Contains("code") || name.Contains("sdk") || name.Contains("git"))
+            return AppCategory.Development;
+        if (name.Contains("chrome") || name.Contains("firefox") || name.Contains("edge") || name.Contains("browser"))
+            return AppCategory.Browser;
+        if (name.Contains("office") || name.Contains("word") || name.Contains("excel") || name.Contains("outlook"))
+            return AppCategory.Productivity;
+        if (name.Contains("vlc") || name.Contains("media") || name.Contains("player") || name.Contains("photo"))
+            return AppCategory.Media;
+        if (name.Contains("security") || name.Contains("antivirus") || name.Contains("defender"))
+            return AppCategory.Security;
+        if (name.Contains("discord") || name.Contains("teams") || name.Contains("zoom") || name.Contains("slack"))
+            return AppCategory.Communication;
+
+        return AppCategory.Other;
+    }
+
     private class StoreAppInfo
     {
         public string? Name { get; set; }
         public string? Publisher { get; set; }
-        public string? Version { get; set; }
         public string? InstallLocation { get; set; }
-        public string? PackageFullName { get; set; }
+        public string? Version { get; set; }
     }
 }

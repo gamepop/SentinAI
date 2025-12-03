@@ -26,7 +26,7 @@ public class ScheduledCleanupServiceTests
 
         // Assert
         Assert.NotNull(tasks);
-        Assert.Equal(2, tasks.Count); // Default: daily temp cleanup + weekly duplicate scan
+        Assert.Equal(3, tasks.Count); // Default: daily temp cleanup + weekly duplicate scan + monthly downloads cleanup
     }
 
     [Fact]

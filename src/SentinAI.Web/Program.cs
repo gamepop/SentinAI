@@ -1,7 +1,9 @@
 using System.IO.Pipes;
 using System.Net.Http;
 using Grpc.Net.Client;
+using Microsoft.AspNetCore.Components;
 using SentinAI.Shared;
+using SentinAI.Shared.Models.DeepScan;
 using SentinAI.Web.Components;
 using SentinAI.Web.Hubs;
 using SentinAI.Web.Services;
@@ -18,7 +20,11 @@ builder.Services.AddRazorComponents()
 builder.Services.AddApplicationInsightsTelemetry();
 
 // HttpClient factory for API calls from server-side components
-builder.Services.AddHttpClient();
+builder.Services.AddScoped(sp =>
+{
+    var navigationManager = sp.GetRequiredService<NavigationManager>();
+    return new HttpClient { BaseAddress = new Uri(navigationManager.BaseUri) };
+});
 
 // Add controllers for API endpoints
 builder.Services.AddControllers();
@@ -80,9 +86,11 @@ builder.Services.AddSingleton<AppDiscoveryService>();
 builder.Services.AddSingleton<DriveManagerService>();
 builder.Services.AddSingleton<SpaceAnalysisService>();
 builder.Services.AddSingleton<IDeepScanRagStore, InMemoryDeepScanRagStore>();
+builder.Services.AddSingleton<IDeepScanSessionStore, FileBasedDeepScanSessionStore>();
 builder.Services.AddSingleton<DeepScanBrainAnalyzer>();
 builder.Services.AddSingleton<DeepScanLearningService>();
 builder.Services.AddSingleton<DeepScanService>();
+builder.Services.AddSingleton<DeepScanExecutionService>();
 
 // Add configuration manager
 builder.Services.AddSingleton<SentinAI.Shared.Services.IConfigurationManager, SentinAI.Shared.Services.ConfigurationManager>();

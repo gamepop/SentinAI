@@ -1,469 +1,368 @@
+using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using SentinAI.Shared.Models.DeepScan;
 
 namespace SentinAI.Web.Services.DeepScan;
 
 /// <summary>
-/// Analyzes space usage and clusters files for recommendations.
+/// Service for analyzing disk space usage and finding cleanup opportunities.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public class SpaceAnalysisService
 {
     private readonly ILogger<SpaceAnalysisService> _logger;
-    private readonly DriveManagerService _driveManager;
-    
-    public SpaceAnalysisService(
-        ILogger<SpaceAnalysisService> logger,
-        DriveManagerService driveManager)
+
+    public SpaceAnalysisService(ILogger<SpaceAnalysisService> logger)
     {
         _logger = logger;
-        _driveManager = driveManager;
     }
-    
+
     /// <summary>
-    /// Groups scanned files into clusters for recommendation.
-    /// </summary>
-    public async Task<List<FileCluster>> ClusterFilesAsync(
-        IReadOnlyList<FileSystemEntry> files,
-        List<InstalledApp> apps,
-        CancellationToken ct = default)
-    {
-        var clusters = new List<FileCluster>();
-        
-        await Task.Run(() =>
-        {
-            // Group by parent directory
-            var directoryGroups = files
-                .GroupBy(f => Path.GetDirectoryName(f.Path) ?? "")
-                .Where(g => g.Count() >= 5) // At least 5 files
-                .ToList();
-            
-            foreach (var group in directoryGroups)
-            {
-                ct.ThrowIfCancellationRequested();
-                
-                var cluster = new FileCluster
-                {
-                    BasePath = group.Key,
-                    Name = Path.GetFileName(group.Key) ?? group.Key,
-                    FilePaths = group.Select(f => f.Path).ToList(),
-                    TotalBytes = group.Sum(f => f.SizeBytes),
-                    OldestFile = group.Min(f => f.Created),
-                    NewestFile = group.Max(f => f.Created),
-                    LastModified = group.Max(f => f.LastModified),
-                    FileTypeDistribution = group
-                        .GroupBy(f => f.Extension)
-                        .ToDictionary(g => g.Key, g => g.Count())
-                };
-                
-                // Categorize the cluster
-                CategorizeCluster(cluster, apps);
-                
-                // Check if relocatable
-                DetermineRelocationEligibility(cluster);
-                
-                clusters.Add(cluster);
-            }
-            
-            // Also create clusters for specific categories
-            AddSpecialClusters(clusters, files, apps, ct);
-            
-        }, ct);
-        
-        return clusters
-            .OrderByDescending(c => c.TotalBytes)
-            .ToList();
-    }
-    
-    private void CategorizeCluster(FileCluster cluster, List<InstalledApp> apps)
-    {
-        var path = cluster.BasePath.ToLowerInvariant();
-        var primaryExt = cluster.PrimaryFileType;
-        
-        // Check for app association
-        foreach (var app in apps)
-        {
-            if (!string.IsNullOrEmpty(app.InstallPath) && 
-                path.StartsWith(app.InstallPath.ToLowerInvariant()))
-            {
-                cluster.AssociatedApp = app.Name;
-                cluster.AssociatedAppId = app.Id;
-                break;
-            }
-            
-            if (app.DataFolders.Any(df => path.StartsWith(df.ToLowerInvariant())))
-            {
-                cluster.AssociatedApp = app.Name;
-                cluster.AssociatedAppId = app.Id;
-                cluster.Type = FileClusterType.AppData;
-                return;
-            }
-            
-            if (app.CacheFolders.Any(cf => path.StartsWith(cf.ToLowerInvariant())))
-            {
-                cluster.AssociatedApp = app.Name;
-                cluster.AssociatedAppId = app.Id;
-                cluster.Type = FileClusterType.AppCache;
-                return;
-            }
-        }
-        
-        // Categorize by path patterns
-        if (path.Contains("\\temp") || path.Contains("\\tmp"))
-        {
-            cluster.Type = FileClusterType.TempFiles;
-            cluster.Category = SpaceCategoryType.TempFiles;
-        }
-        else if (path.Contains("\\cache") || path.Contains("\\cached"))
-        {
-            cluster.Type = FileClusterType.AppCache;
-            cluster.Category = SpaceCategoryType.BrowserCache;
-        }
-        else if (path.Contains("\\downloads"))
-        {
-            cluster.Type = FileClusterType.Downloads;
-            cluster.Category = SpaceCategoryType.UserDownloads;
-        }
-        else if (path.Contains("\\documents"))
-        {
-            cluster.Type = FileClusterType.Documents;
-            cluster.Category = SpaceCategoryType.UserDocuments;
-        }
-        else if (path.Contains("\\pictures") || path.Contains("\\photos"))
-        {
-            cluster.Type = FileClusterType.MediaPhotos;
-            cluster.Category = SpaceCategoryType.UserMedia;
-        }
-        else if (path.Contains("\\videos") || path.Contains("\\movies"))
-        {
-            cluster.Type = FileClusterType.MediaVideos;
-            cluster.Category = SpaceCategoryType.UserMedia;
-        }
-        else if (path.Contains("\\music"))
-        {
-            cluster.Type = FileClusterType.MediaMusic;
-            cluster.Category = SpaceCategoryType.UserMedia;
-        }
-        else if (path.Contains("\\node_modules") || path.Contains("\\bin\\") || 
-                 path.Contains("\\obj\\") || path.Contains("\\.nuget"))
-        {
-            cluster.Type = FileClusterType.DeveloperArtifacts;
-            cluster.Category = SpaceCategoryType.Other;
-        }
-        else if (path.Contains("\\steam") || path.Contains("\\epic games") || 
-                 path.Contains("\\origin") || path.Contains("\\gog"))
-        {
-            cluster.Type = FileClusterType.GameAssets;
-            cluster.Category = SpaceCategoryType.Games;
-        }
-        // Categorize by file type
-        else if (new[] { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" }.Contains(primaryExt))
-        {
-            cluster.Type = FileClusterType.MediaPhotos;
-            cluster.Category = SpaceCategoryType.UserMedia;
-        }
-        else if (new[] { ".mp4", ".mkv", ".avi", ".mov", ".wmv" }.Contains(primaryExt))
-        {
-            cluster.Type = FileClusterType.MediaVideos;
-            cluster.Category = SpaceCategoryType.UserMedia;
-        }
-        else if (new[] { ".mp3", ".flac", ".wav", ".aac", ".ogg" }.Contains(primaryExt))
-        {
-            cluster.Type = FileClusterType.MediaMusic;
-            cluster.Category = SpaceCategoryType.UserMedia;
-        }
-        else if (new[] { ".zip", ".rar", ".7z", ".tar", ".gz" }.Contains(primaryExt))
-        {
-            cluster.Type = FileClusterType.Archives;
-            cluster.Category = SpaceCategoryType.Other;
-        }
-        else
-        {
-            cluster.Type = FileClusterType.Unknown;
-            cluster.Category = SpaceCategoryType.Other;
-        }
-    }
-    
-    private void DetermineRelocationEligibility(FileCluster cluster)
-    {
-        // User data is relocatable
-        cluster.CanRelocate = cluster.Type switch
-        {
-            FileClusterType.Documents => true,
-            FileClusterType.Downloads => true,
-            FileClusterType.MediaPhotos => true,
-            FileClusterType.MediaVideos => true,
-            FileClusterType.MediaMusic => true,
-            FileClusterType.Archives => true,
-            FileClusterType.GameAssets => true, // With junction
-            FileClusterType.DeveloperArtifacts => false, // Usually break if moved
-            FileClusterType.AppCache => false,
-            FileClusterType.AppData => false,
-            FileClusterType.TempFiles => false,
-            _ => false
-        };
-        
-        // Games typically require junctions
-        cluster.RequiresJunction = cluster.Type == FileClusterType.GameAssets;
-        
-        // Get available drives for relocation
-        if (cluster.CanRelocate)
-        {
-            var currentDrive = Path.GetPathRoot(cluster.BasePath) ?? "C:\\";
-            cluster.AvailableDrives = _driveManager.GetRelocationTargets(
-                cluster.TotalBytes, 
-                currentDrive);
-        }
-    }
-    
-    private void AddSpecialClusters(
-        List<FileCluster> clusters,
-        IReadOnlyList<FileSystemEntry> files,
-        List<InstalledApp> apps,
-        CancellationToken ct)
-    {
-        // Old files cluster (not accessed in 1+ year)
-        var oneYearAgo = DateTime.Now.AddYears(-1);
-        var oldFiles = files
-            .Where(f => f.LastAccessed < oneYearAgo)
-            .Where(f => f.SizeBytes > 10 * 1024 * 1024) // >10MB
-            .ToList();
-        
-        if (oldFiles.Any())
-        {
-            var oldCluster = new FileCluster
-            {
-                Name = "Old Unused Files",
-                BasePath = "Various Locations",
-                Type = FileClusterType.OldFiles,
-                FilePaths = oldFiles.Select(f => f.Path).ToList(),
-                TotalBytes = oldFiles.Sum(f => f.SizeBytes),
-                OldestFile = oldFiles.Min(f => f.LastAccessed),
-                NewestFile = oldFiles.Max(f => f.LastAccessed),
-                LastModified = oldFiles.Max(f => f.LastModified),
-                CanRelocate = true
-            };
-            clusters.Add(oldCluster);
-        }
-        
-        // Large files cluster
-        var largeFiles = files
-            .Where(f => f.SizeBytes > 1024 * 1024 * 1024) // >1GB
-            .OrderByDescending(f => f.SizeBytes)
-            .Take(50)
-            .ToList();
-        
-        if (largeFiles.Any())
-        {
-            var largeCluster = new FileCluster
-            {
-                Name = "Large Files (>1GB)",
-                BasePath = "Various Locations",
-                Type = FileClusterType.LargeFiles,
-                FilePaths = largeFiles.Select(f => f.Path).ToList(),
-                TotalBytes = largeFiles.Sum(f => f.SizeBytes),
-                FileTypeDistribution = largeFiles
-                    .GroupBy(f => f.Extension)
-                    .ToDictionary(g => g.Key, g => g.Count()),
-                CanRelocate = true
-            };
-            clusters.Add(largeCluster);
-        }
-    }
-    
-    /// <summary>
-    /// Finds cleanup opportunities from the drive analysis.
+    /// Finds cleanup opportunities on a drive.
     /// </summary>
     public async Task<List<CleanupOpportunity>> FindCleanupOpportunitiesAsync(
-        List<DriveAnalysis> drives,
-        List<InstalledApp> apps,
+        string drivePath,
         CancellationToken ct = default)
     {
         var opportunities = new List<CleanupOpportunity>();
-        
+
         await Task.Run(() =>
         {
-            foreach (var drive in drives)
-            {
-                ct.ThrowIfCancellationRequested();
-                var root = drive.DriveLetter;
-                
-                // Windows Temp
-                AddTempOpportunity(opportunities, Path.Combine(root, "Windows", "Temp"), 
-                    CleanupType.WindowsTemp, "Windows temporary files");
-                
-                // User Temp folders
-                var usersPath = Path.Combine(root, "Users");
-                if (Directory.Exists(usersPath))
-                {
-                    foreach (var userDir in Directory.GetDirectories(usersPath))
-                    {
-                        var userName = Path.GetFileName(userDir);
-                        if (userName is "Public" or "Default" or "Default User") continue;
-                        
-                        AddTempOpportunity(opportunities, 
-                            Path.Combine(userDir, "AppData", "Local", "Temp"),
-                            CleanupType.UserTemp, $"User temp files ({userName})");
-                        
-                        // Browser caches
-                        AddBrowserCacheOpportunities(opportunities, userDir, userName);
-                        
-                        // Thumbnail cache
-                        AddTempOpportunity(opportunities,
-                            Path.Combine(userDir, "AppData", "Local", "Microsoft", "Windows", "Explorer"),
-                            CleanupType.ThumbnailCache, $"Thumbnail cache ({userName})");
-                    }
-                }
-                
-                // Windows Update cache
-                AddTempOpportunity(opportunities, 
-                    Path.Combine(root, "Windows", "SoftwareDistribution", "Download"),
-                    CleanupType.WindowsUpdateCache, "Windows Update download cache");
-                
-                // Recycle Bin
-                var recycleBin = Path.Combine(root, "$Recycle.Bin");
-                if (Directory.Exists(recycleBin))
-                {
-                    var size = GetDirectorySizeSafe(recycleBin);
-                    if (size > 0)
-                    {
-                        opportunities.Add(new CleanupOpportunity
-                        {
-                            Type = CleanupType.RecycleBin,
-                            Path = recycleBin,
-                            Description = "Recycle Bin contents",
-                            Bytes = size,
-                            Risk = CleanupRisk.Low,
-                            Confidence = 0.95
-                        });
-                    }
-                }
-            }
-            
-            // App-specific caches
-            foreach (var app in apps.Where(a => a.CacheSizeBytes > 10 * 1024 * 1024)) // >10MB cache
-            {
-                foreach (var cachePath in app.CacheFolders)
-                {
-                    if (Directory.Exists(cachePath))
-                    {
-                        opportunities.Add(new CleanupOpportunity
-                        {
-                            Type = CleanupType.AppCache,
-                            Path = cachePath,
-                            Description = $"{app.Name} cache",
-                            AssociatedApp = app.Name,
-                            Bytes = GetDirectorySizeSafe(cachePath),
-                            Risk = CleanupRisk.Low,
-                            Confidence = 0.85
-                        });
-                    }
-                }
-            }
-            
+            // Windows Temp
+            var windowsTemp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp");
+            AddTempFolderOpportunity(opportunities, windowsTemp, CleanupType.WindowsTemp, "Windows temporary files");
+
+            // User Temp
+            var userTemp = Path.GetTempPath();
+            AddTempFolderOpportunity(opportunities, userTemp, CleanupType.UserTemp, "User temporary files");
+
+            // Browser caches
+            AddBrowserCacheOpportunities(opportunities);
+
+            // Thumbnail cache
+            var thumbCache = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Microsoft", "Windows", "Explorer");
+            AddThumbnailCacheOpportunity(opportunities, thumbCache);
+
+            // Windows Update cache
+            var updateCache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "SoftwareDistribution", "Download");
+            AddTempFolderOpportunity(opportunities, updateCache, CleanupType.WindowsUpdateCache, "Windows Update download cache");
+
+            // Recycle Bin
+            AddRecycleBinOpportunity(opportunities, drivePath);
+
         }, ct);
-        
-        return opportunities
-            .Where(o => o.Bytes > 1024 * 1024) // >1MB
-            .OrderByDescending(o => o.Bytes)
-            .ToList();
+
+        _logger.LogInformation("Found {Count} cleanup opportunities", opportunities.Count);
+        return opportunities.Where(o => o.Bytes > 0).OrderByDescending(o => o.Bytes).ToList();
     }
-    
-    private void AddTempOpportunity(
-        List<CleanupOpportunity> opportunities,
-        string path,
-        CleanupType type,
-        string description)
+
+    /// <summary>
+    /// Identifies file clusters that could be relocated.
+    /// </summary>
+    public async Task<List<FileCluster>> IdentifyRelocationCandidatesAsync(
+        IEnumerable<FileSystemEntry> files,
+        List<AvailableDrive> availableDrives,
+        CancellationToken ct = default)
+    {
+        var clusters = new List<FileCluster>();
+
+        await Task.Run(() =>
+        {
+            // Group by common directories and file types
+            var videoFiles = files.Where(f => IsVideoFile(f.Extension)).ToList();
+            var photoFiles = files.Where(f => IsPhotoFile(f.Extension)).ToList();
+            var archiveFiles = files.Where(f => IsArchiveFile(f.Extension)).ToList();
+
+            // Create clusters for significant groupings
+            if (videoFiles.Any())
+            {
+                var videoCluster = CreateCluster(videoFiles, FileClusterType.MediaVideos, "Video Files", availableDrives);
+                if (videoCluster.TotalBytes > 500 * 1024 * 1024) // >500MB
+                    clusters.Add(videoCluster);
+            }
+
+            if (photoFiles.Any())
+            {
+                var photoCluster = CreateCluster(photoFiles, FileClusterType.MediaPhotos, "Photo Collection", availableDrives);
+                if (photoCluster.TotalBytes > 100 * 1024 * 1024) // >100MB
+                    clusters.Add(photoCluster);
+            }
+
+            if (archiveFiles.Any())
+            {
+                var archiveCluster = CreateCluster(archiveFiles, FileClusterType.Archives, "Archive Files", availableDrives);
+                if (archiveCluster.TotalBytes > 100 * 1024 * 1024) // >100MB
+                    clusters.Add(archiveCluster);
+            }
+
+            // Find Downloads folder
+            var downloads = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads";
+            var downloadFiles = files.Where(f => f.Path.StartsWith(downloads, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (downloadFiles.Any())
+            {
+                var downloadCluster = new FileCluster
+                {
+                    Name = "Downloads Folder",
+                    BasePath = downloads,
+                    Type = FileClusterType.Downloads,
+                    PrimaryFileType = "mixed",
+                    TotalBytes = downloadFiles.Sum(f => f.SizeBytes),
+                    FileCount = downloadFiles.Count,
+                    CanRelocate = true,
+                    AvailableDrives = availableDrives
+                };
+                if (downloadCluster.TotalBytes > 500 * 1024 * 1024) // >500MB
+                    clusters.Add(downloadCluster);
+            }
+
+        }, ct);
+
+        return clusters.OrderByDescending(c => c.TotalBytes).ToList();
+    }
+
+    private void AddTempFolderOpportunity(List<CleanupOpportunity> opportunities, string path, CleanupType type, string description)
     {
         if (!Directory.Exists(path)) return;
-        
-        var size = GetDirectorySizeSafe(path);
-        var fileCount = GetFileCountSafe(path);
-        
-        if (size > 0)
+
+        try
         {
-            opportunities.Add(new CleanupOpportunity
+            var (bytes, count) = GetFolderStats(path);
+            if (bytes > 0)
             {
-                Type = type,
-                Path = path,
-                Description = description,
-                Bytes = size,
-                FileCount = fileCount,
-                Risk = CleanupRisk.None,
-                Confidence = 0.95
-            });
-        }
-    }
-    
-    private void AddBrowserCacheOpportunities(
-        List<CleanupOpportunity> opportunities, 
-        string userDir,
-        string userName)
-    {
-        var browsers = new Dictionary<string, string[]>
-        {
-            ["Chrome"] = new[] { "AppData", "Local", "Google", "Chrome", "User Data", "Default", "Cache" },
-            ["Edge"] = new[] { "AppData", "Local", "Microsoft", "Edge", "User Data", "Default", "Cache" },
-            ["Firefox"] = new[] { "AppData", "Local", "Mozilla", "Firefox", "Profiles" },
-            ["Brave"] = new[] { "AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data", "Default", "Cache" }
-        };
-        
-        foreach (var (browserName, pathParts) in browsers)
-        {
-            var cachePath = Path.Combine(new[] { userDir }.Concat(pathParts).ToArray());
-            
-            if (Directory.Exists(cachePath))
-            {
-                var size = GetDirectorySizeSafe(cachePath);
-                if (size > 10 * 1024 * 1024) // >10MB
+                opportunities.Add(new CleanupOpportunity
                 {
-                    opportunities.Add(new CleanupOpportunity
-                    {
-                        Type = CleanupType.BrowserCache,
-                        Path = cachePath,
-                        Description = $"{browserName} cache ({userName})",
-                        AssociatedApp = browserName,
-                        Bytes = size,
-                        Risk = CleanupRisk.None,
-                        Confidence = 0.95
-                    });
-                }
+                    Type = type,
+                    Path = path,
+                    Description = description,
+                    Bytes = bytes,
+                    FileCount = count,
+                    Risk = CleanupRisk.None
+                });
             }
         }
-    }
-    
-    private long GetDirectorySizeSafe(string path)
-    {
-        try
+        catch (Exception ex)
         {
-            return Directory.EnumerateFiles(path, "*", new EnumerationOptions
+            _logger.LogDebug(ex, "Error analyzing {Path}", path);
+        }
+    }
+
+    private void AddBrowserCacheOpportunities(List<CleanupOpportunity> opportunities)
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        // Chrome
+        var chromeCache = Path.Combine(localAppData, "Google", "Chrome", "User Data", "Default", "Cache");
+        if (Directory.Exists(chromeCache))
+        {
+            var (bytes, count) = GetFolderStats(chromeCache);
+            opportunities.Add(new CleanupOpportunity
             {
-                IgnoreInaccessible = true,
-                RecurseSubdirectories = true
-            }).Sum(f =>
-            {
-                try { return new FileInfo(f).Length; }
-                catch { return 0; }
+                Type = CleanupType.BrowserCache,
+                Path = chromeCache,
+                Description = "Google Chrome cache",
+                Bytes = bytes,
+                FileCount = count,
+                Risk = CleanupRisk.None,
+                AssociatedApp = "Google Chrome"
             });
         }
-        catch
+
+        // Edge
+        var edgeCache = Path.Combine(localAppData, "Microsoft", "Edge", "User Data", "Default", "Cache");
+        if (Directory.Exists(edgeCache))
         {
-            return 0;
+            var (bytes, count) = GetFolderStats(edgeCache);
+            opportunities.Add(new CleanupOpportunity
+            {
+                Type = CleanupType.BrowserCache,
+                Path = edgeCache,
+                Description = "Microsoft Edge cache",
+                Bytes = bytes,
+                FileCount = count,
+                Risk = CleanupRisk.None,
+                AssociatedApp = "Microsoft Edge"
+            });
+        }
+
+        // Firefox
+        var firefoxPath = Path.Combine(localAppData, "Mozilla", "Firefox", "Profiles");
+        if (Directory.Exists(firefoxPath))
+        {
+            try
+            {
+                foreach (var profile in Directory.GetDirectories(firefoxPath))
+                {
+                    var cache = Path.Combine(profile, "cache2");
+                    if (Directory.Exists(cache))
+                    {
+                        var (bytes, count) = GetFolderStats(cache);
+                        opportunities.Add(new CleanupOpportunity
+                        {
+                            Type = CleanupType.BrowserCache,
+                            Path = cache,
+                            Description = "Mozilla Firefox cache",
+                            Bytes = bytes,
+                            FileCount = count,
+                            Risk = CleanupRisk.None,
+                            AssociatedApp = "Mozilla Firefox"
+                        });
+                        break;
+                    }
+                }
+            }
+            catch { }
         }
     }
-    
-    private int GetFileCountSafe(string path)
+
+    private void AddThumbnailCacheOpportunity(List<CleanupOpportunity> opportunities, string path)
     {
+        if (!Directory.Exists(path)) return;
+
         try
         {
-            return Directory.EnumerateFiles(path, "*", new EnumerationOptions
+            var thumbFiles = Directory.GetFiles(path, "thumbcache*.db", SearchOption.TopDirectoryOnly);
+            var bytes = thumbFiles.Sum(f => new FileInfo(f).Length);
+            if (bytes > 0)
+            {
+                opportunities.Add(new CleanupOpportunity
+                {
+                    Type = CleanupType.ThumbnailCache,
+                    Path = path,
+                    Description = "Windows thumbnail cache (will rebuild automatically)",
+                    Bytes = bytes,
+                    FileCount = thumbFiles.Length,
+                    Risk = CleanupRisk.Low
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error analyzing thumbnail cache at {Path}", path);
+        }
+    }
+
+    private void AddRecycleBinOpportunity(List<CleanupOpportunity> opportunities, string drivePath)
+    {
+        var recycleBinPath = Path.Combine(drivePath, "$Recycle.Bin");
+        if (!Directory.Exists(recycleBinPath)) return;
+
+        try
+        {
+            long totalBytes = 0;
+            int fileCount = 0;
+
+            foreach (var userBin in Directory.GetDirectories(recycleBinPath))
+            {
+                try
+                {
+                    var (bytes, count) = GetFolderStats(userBin);
+                    totalBytes += bytes;
+                    fileCount += count;
+                }
+                catch { }
+            }
+
+            if (totalBytes > 0)
+            {
+                opportunities.Add(new CleanupOpportunity
+                {
+                    Type = CleanupType.RecycleBin,
+                    Path = recycleBinPath,
+                    Description = "Recycle Bin contents",
+                    Bytes = totalBytes,
+                    FileCount = fileCount,
+                    Risk = CleanupRisk.Medium // Medium because user may want to restore
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error analyzing Recycle Bin at {Path}", recycleBinPath);
+        }
+    }
+
+    private (long bytes, int count) GetFolderStats(string path)
+    {
+        long bytes = 0;
+        int count = 0;
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(path, "*", new EnumerationOptions
             {
                 IgnoreInaccessible = true,
                 RecurseSubdirectories = true
-            }).Count();
+            }))
+            {
+                try
+                {
+                    var info = new FileInfo(file);
+                    bytes += info.Length;
+                    count++;
+                }
+                catch { }
+            }
         }
-        catch
-        {
-            return 0;
-        }
+        catch { }
+
+        return (bytes, count);
     }
+
+    private FileCluster CreateCluster(
+        List<FileSystemEntry> files,
+        FileClusterType type,
+        string name,
+        List<AvailableDrive> availableDrives)
+    {
+        var basePath = FindCommonPath(files.Select(f => f.Path).ToList());
+        var primaryExtension = files
+            .GroupBy(f => f.Extension)
+            .OrderByDescending(g => g.Sum(f => f.SizeBytes))
+            .First().Key;
+
+        return new FileCluster
+        {
+            Name = name,
+            BasePath = basePath,
+            Type = type,
+            PrimaryFileType = primaryExtension,
+            TotalBytes = files.Sum(f => f.SizeBytes),
+            FileCount = files.Count,
+            CanRelocate = true,
+            AvailableDrives = availableDrives
+        };
+    }
+
+    private string FindCommonPath(List<string> paths)
+    {
+        if (!paths.Any()) return "";
+        if (paths.Count == 1) return Path.GetDirectoryName(paths[0]) ?? "";
+
+        var first = paths[0];
+        var common = first;
+
+        foreach (var path in paths.Skip(1))
+        {
+            while (!path.StartsWith(common, StringComparison.OrdinalIgnoreCase) && common.Length > 3)
+            {
+                common = Path.GetDirectoryName(common) ?? "";
+            }
+        }
+
+        return common;
+    }
+
+    private static bool IsVideoFile(string extension) =>
+        new[] { ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v" }
+            .Contains(extension.ToLowerInvariant());
+
+    private static bool IsPhotoFile(string extension) =>
+        new[] { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".raw", ".heic", ".webp" }
+            .Contains(extension.ToLowerInvariant());
+
+    private static bool IsArchiveFile(string extension) =>
+        new[] { ".zip", ".rar", ".7z", ".tar", ".gz", ".iso" }
+            .Contains(extension.ToLowerInvariant());
 }

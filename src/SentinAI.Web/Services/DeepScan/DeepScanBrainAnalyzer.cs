@@ -10,19 +10,19 @@ namespace SentinAI.Web.Services.DeepScan;
 public class DeepScanBrainAnalyzer
 {
     private readonly ILogger<DeepScanBrainAnalyzer> _logger;
-    private readonly AgentBrain _brain;
+    private readonly IAgentBrain _brain;
     private readonly IDeepScanRagStore _ragStore;
-    
+
     public DeepScanBrainAnalyzer(
         ILogger<DeepScanBrainAnalyzer> logger,
-        AgentBrain brain,
+        IAgentBrain brain,
         IDeepScanRagStore ragStore)
     {
         _logger = logger;
         _brain = brain;
         _ragStore = ragStore;
     }
-    
+
     /// <summary>
     /// Analyzes an app for removal recommendation with RAG context.
     /// </summary>
@@ -31,17 +31,17 @@ public class DeepScanBrainAnalyzer
         CancellationToken ct = default)
     {
         _logger.LogDebug("Analyzing app for removal: {App}", app.Name);
-        
+
         // Retrieve similar past decisions from RAG
         var similarDecisions = await _ragStore.FindSimilarAppDecisionsAsync(app);
         var publisherPatterns = await _ragStore.GetAppRemovalPatternsAsync(app.Publisher);
-        
+
         // Use heuristics + learning patterns (AI prompt analysis will be added when brain supports it)
         var (shouldRemove, confidence, category, reason) = AnalyzeAppWithHeuristics(app, similarDecisions, publisherPatterns);
-        
+
         // Adjust confidence based on learning
         confidence = AdjustConfidence(confidence, similarDecisions);
-        
+
         var recommendation = new AppRemovalRecommendation
         {
             App = app,
@@ -58,10 +58,10 @@ public class DeepScanBrainAnalyzer
             SimilarPastDecisions = similarDecisions.Count,
             LearnedInfluence = BuildLearnedInfluenceText(similarDecisions, publisherPatterns)
         };
-        
+
         return recommendation;
     }
-    
+
     /// <summary>
     /// Analyzes files for relocation recommendation with RAG context.
     /// </summary>
@@ -70,17 +70,17 @@ public class DeepScanBrainAnalyzer
         CancellationToken ct = default)
     {
         _logger.LogDebug("Analyzing files for relocation: {Path}", cluster.BasePath);
-        
+
         // Retrieve similar past decisions
         var similarDecisions = await _ragStore.FindSimilarFileDecisionsAsync(cluster);
         var fileTypePattern = await _ragStore.GetRelocationPatternsAsync(cluster.PrimaryFileType);
-        
+
         // Use heuristics + learning patterns
         var (shouldRelocate, priority, targetDrive, reason) = AnalyzeRelocationWithHeuristics(cluster, similarDecisions, fileTypePattern);
-        
+
         var confidence = 0.7 + (similarDecisions.Count * 0.05); // Base + learning boost
         confidence = Math.Min(confidence, 0.95);
-        
+
         var recommendation = new RelocationRecommendation
         {
             Cluster = cluster,
@@ -93,10 +93,10 @@ public class DeepScanBrainAnalyzer
             SimilarPastDecisions = similarDecisions.Count,
             LearnedInfluence = BuildFileLearnedInfluenceText(similarDecisions, fileTypePattern)
         };
-        
+
         return recommendation;
     }
-    
+
     /// <summary>
     /// Analyzes a cleanup opportunity with RAG context.
     /// </summary>
@@ -116,13 +116,13 @@ public class DeepScanBrainAnalyzer
             CleanupType.AppCache => $"[AI] {opportunity.AssociatedApp ?? "App"} cache - generally safe to clean",
             _ => "[AI] Analyzed for cleanup"
         };
-        
+
         opportunity.AiReason = reason;
         opportunity.Confidence = opportunity.Risk == CleanupRisk.None ? 0.95 : 0.75;
-        
+
         return await Task.FromResult(opportunity);
     }
-    
+
     private (bool shouldRemove, double confidence, AppRemovalCategory category, string reason) AnalyzeAppWithHeuristics(
         InstalledApp app,
         List<DeepScanMemory> similarDecisions,
@@ -131,24 +131,24 @@ public class DeepScanBrainAnalyzer
         // Check if it's bloatware
         if (app.IsBloatware)
         {
-            return (true, 0.9, AppRemovalCategory.Bloatware, 
+            return (true, 0.9, AppRemovalCategory.Bloatware,
                 "[AI] Detected as bloatware/pre-installed unnecessary software");
         }
-        
+
         // Check if it's a system app
         if (app.IsSystemApp)
         {
             return (false, 0.95, AppRemovalCategory.KeepRecommended,
                 "[AI] System app - required for Windows functionality");
         }
-        
+
         // Check publisher patterns from learning
         if (publisherPatterns.TotalDecisions >= 3 && publisherPatterns.RemovalRate > 0.8)
         {
             return (true, 0.85, AppRemovalCategory.Bloatware,
                 $"[AI] User typically removes apps from {app.Publisher} ({publisherPatterns.RemovalRate:P0} removal rate)");
         }
-        
+
         // Check if unused (90+ days)
         if (app.IsUnused && app.DaysSinceLastUse > 90)
         {
@@ -156,19 +156,19 @@ public class DeepScanBrainAnalyzer
             return (true, confidence, AppRemovalCategory.Unused,
                 $"[AI] Not used in {app.DaysSinceLastUse} days");
         }
-        
+
         // Large unused apps
         if (app.TotalSizeBytes > 1024L * 1024 * 1024 && app.IsUnused) // >1GB and unused
         {
             return (true, 0.75, AppRemovalCategory.LargeUnused,
                 $"[AI] Large app ({app.TotalSizeFormatted}) not used in {app.DaysSinceLastUse} days");
         }
-        
+
         // Default: optional, lean towards keeping
         return (false, 0.6, AppRemovalCategory.Optional,
             "[AI] App appears to be in use or recently accessed");
     }
-    
+
     private (bool shouldRelocate, int priority, string? targetDrive, string reason) AnalyzeRelocationWithHeuristics(
         FileCluster cluster,
         List<DeepScanMemory> similarDecisions,
@@ -178,9 +178,9 @@ public class DeepScanBrainAnalyzer
         {
             return (false, 1, null, "[AI] Files cannot be safely relocated");
         }
-        
+
         // Check learned preferences
-        if (fileTypePattern.TotalDecisions >= 2 && 
+        if (fileTypePattern.TotalDecisions >= 2 &&
             fileTypePattern.RelocationRate > 0.7 &&
             !string.IsNullOrEmpty(fileTypePattern.PreferredTargetDrive))
         {
@@ -188,7 +188,7 @@ public class DeepScanBrainAnalyzer
             return (true, priority, fileTypePattern.PreferredTargetDrive,
                 $"[AI] User prefers {cluster.PrimaryFileType} files on {fileTypePattern.PreferredTargetDrive}");
         }
-        
+
         // Prioritize by size
         int sizePriority;
         if (cluster.TotalBytes > 50L * 1024 * 1024 * 1024) // >50GB
@@ -199,7 +199,7 @@ public class DeepScanBrainAnalyzer
             sizePriority = 3;
         else
             sizePriority = 2;
-        
+
         // Determine reason based on cluster type
         var reason = cluster.Type switch
         {
@@ -211,63 +211,63 @@ public class DeepScanBrainAnalyzer
             FileClusterType.OldFiles => $"[AI] Old unused files ({cluster.TotalSizeFormatted}) - consider archiving",
             _ => $"[AI] Files ({cluster.TotalSizeFormatted}) can be relocated to free space"
         };
-        
+
         var targetDrive = cluster.AvailableDrives.FirstOrDefault()?.Letter;
-        
+
         return (targetDrive != null, sizePriority, targetDrive, reason);
     }
-    
+
     private double AdjustConfidence(double baseConfidence, List<DeepScanMemory> similarDecisions)
     {
         if (!similarDecisions.Any())
             return baseConfidence;
-        
+
         // Calculate agreement rate with past decisions
         var agreementRate = similarDecisions.Count(m => m.UserAgreed) / (double)similarDecisions.Count;
-        
+
         // Adjust confidence: if AI was often wrong, reduce; if often right, boost
         var adjustment = (agreementRate - 0.5) * 0.2; // ±10% max adjustment
-        
+
         return Math.Clamp(baseConfidence + adjustment, 0.1, 0.95);
     }
-    
+
     private string? BuildLearnedInfluenceText(List<DeepScanMemory> memories, AppRemovalPattern pattern)
     {
         if (!memories.Any() && pattern.TotalDecisions == 0)
             return null;
-        
+
         var parts = new List<string>();
-        
+
         if (memories.Any())
         {
             parts.Add($"Based on {memories.Count} similar past decision(s)");
         }
-        
+
         if (pattern.TotalDecisions > 0)
         {
             parts.Add($"Publisher removal rate: {pattern.RemovalRate:P0}");
         }
-        
+
         return string.Join(". ", parts);
     }
-    
+
     private string? BuildFileLearnedInfluenceText(List<DeepScanMemory> memories, FileRelocationPattern pattern)
     {
         if (!memories.Any() && pattern.TotalDecisions == 0)
             return null;
-        
+
         var parts = new List<string>();
-        
+
         if (memories.Any())
         {
             parts.Add($"Based on {memories.Count} similar file decision(s)");
         }
-        
+
         if (pattern.TotalDecisions > 0 && !string.IsNullOrEmpty(pattern.PreferredTargetDrive))
         {
             parts.Add($"User prefers {pattern.PreferredTargetDrive} for {pattern.FileType} files");
         }
-        
+
         return string.Join(". ", parts);
     }
 }

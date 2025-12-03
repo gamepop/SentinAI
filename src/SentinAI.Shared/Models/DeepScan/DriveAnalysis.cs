@@ -1,150 +1,130 @@
 namespace SentinAI.Shared.Models.DeepScan;
 
 /// <summary>
-/// Represents space analysis for a single drive.
+/// Information about a target drive for scanning/relocation.
 /// </summary>
-public class DriveAnalysis
+public class TargetDriveInfo
+{
+    public string Letter { get; set; } = "";
+    public string Label { get; set; } = "";
+    public long TotalSpace { get; set; }
+    public long FreeSpace { get; set; }
+    public long UsedSpace => TotalSpace - FreeSpace;
+    public double UsedPercentage => TotalSpace > 0 ? (double)UsedSpace / TotalSpace * 100 : 0;
+    public string DriveType { get; set; } = "";
+    public bool IsReady { get; set; }
+
+    public string TotalSpaceFormatted => FormatBytes(TotalSpace);
+    public string FreeSpaceFormatted => FormatBytes(FreeSpace);
+    public string UsedSpaceFormatted => FormatBytes(UsedSpace);
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+}
+
+/// <summary>
+/// Options for configuring a deep scan.
+/// </summary>
+public class DeepScanOptions
+{
+    /// <summary>
+    /// Drives to scan.
+    /// </summary>
+    public List<string> TargetDrives { get; set; } = new();
+
+    /// <summary>
+    /// Whether to scan installed applications.
+    /// </summary>
+    public bool ScanInstalledApps { get; set; } = true;
+
+    /// <summary>
+    /// Whether to scan for duplicate files.
+    /// </summary>
+    public bool ScanForDuplicates { get; set; } = true;
+
+    /// <summary>
+    /// Whether to include hidden files in scanning.
+    /// </summary>
+    public bool IncludeHiddenFiles { get; set; } = false;
+
+    /// <summary>
+    /// Whether to generate file relocation plans.
+    /// </summary>
+    public bool GenerateRelocationPlans { get; set; } = true;
+
+    /// <summary>
+    /// Paths to exclude from scanning.
+    /// </summary>
+    public List<string> ExcludePaths { get; set; } = new()
+    {
+        @"Windows",
+        @"Program Files",
+        @"Program Files (x86)",
+        @"$Recycle.Bin",
+        @"System Volume Information"
+    };
+
+    /// <summary>
+    /// Minimum file size to consider (bytes).
+    /// </summary>
+    public long MinFileSizeBytes { get; set; } = 1024; // 1KB
+
+    /// <summary>
+    /// Maximum files to scan before stopping.
+    /// </summary>
+    public int MaxFilesToScan { get; set; } = 1_000_000;
+}
+
+/// <summary>
+/// Drive analysis results.
+/// </summary>
+public class DriveAnalysisResult
 {
     public string DriveLetter { get; set; } = "";
-    public string VolumeLabel { get; set; } = "";
-    public DriveType DriveType { get; set; }
-    
-    public long TotalBytes { get; set; }
-    public long FreeBytes { get; set; }
-    public long UsedBytes => TotalBytes - FreeBytes;
-    public double UsedPercentage => TotalBytes > 0 ? (UsedBytes * 100.0 / TotalBytes) : 0;
-    
-    public List<SpaceCategory> Categories { get; set; } = new();
-    public List<LargeFile> LargestFiles { get; set; } = new();
-    public List<DirectorySize> LargestDirectories { get; set; } = new();
-    
-    // Formatted properties
-    public string TotalFormatted => FormatBytes(TotalBytes);
-    public string FreeFormatted => FormatBytes(FreeBytes);
-    public string UsedFormatted => FormatBytes(UsedBytes);
-    
-    public bool IsLowOnSpace => UsedPercentage > 90;
-    public bool CanAcceptRelocations => FreeBytes > 10L * 1024 * 1024 * 1024; // >10GB free
-    
-    private static string FormatBytes(long bytes)
-    {
-        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-        int order = 0;
-        double size = bytes;
-        while (size >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-        return $"{size:0.##} {sizes[order]}";
-    }
+    public long TotalSpace { get; set; }
+    public long UsedSpace { get; set; }
+    public long FreeSpace { get; set; }
+
+    // Breakdown by category
+    public long SystemFilesBytes { get; set; }
+    public long ApplicationsBytes { get; set; }
+    public long DocumentsBytes { get; set; }
+    public long MediaBytes { get; set; }
+    public long TempFilesBytes { get; set; }
+    public long OtherBytes { get; set; }
+
+    // File counts
+    public int TotalFiles { get; set; }
+    public int TotalDirectories { get; set; }
+
+    // Largest items
+    public List<LargeItem> LargestFiles { get; set; } = new();
+    public List<LargeItem> LargestDirectories { get; set; } = new();
 }
 
-public class SpaceCategory
-{
-    public string Name { get; set; } = "";
-    public SpaceCategoryType Type { get; set; }
-    public long Bytes { get; set; }
-    public int FileCount { get; set; }
-    public int DirectoryCount { get; set; }
-    public double Percentage { get; set; }
-    public string Color { get; set; } = "#888888"; // For UI visualization
-    
-    public string BytesFormatted => FormatBytes(Bytes);
-    
-    public List<SpaceCategory> SubCategories { get; set; } = new();
-    
-    private static string FormatBytes(long bytes)
-    {
-        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-        int order = 0;
-        double size = bytes;
-        while (size >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-        return $"{size:0.##} {sizes[order]}";
-    }
-}
-
-public enum SpaceCategoryType
-{
-    System,
-    Applications,
-    Games,
-    UserDocuments,
-    UserDownloads,
-    UserMedia,
-    UserDesktop,
-    AppDataLocal,
-    AppDataRoaming,
-    ProgramData,
-    TempFiles,
-    BrowserCache,
-    WindowsUpdate,
-    SystemRestore,
-    RecycleBin,
-    Other
-}
-
-public class LargeFile
+/// <summary>
+/// Represents a large file or directory.
+/// </summary>
+public class LargeItem
 {
     public string Path { get; set; } = "";
     public string Name { get; set; } = "";
-    public string Extension { get; set; } = "";
-    public long Bytes { get; set; }
+    public long SizeBytes { get; set; }
+    public bool IsDirectory { get; set; }
     public DateTime LastModified { get; set; }
-    public DateTime LastAccessed { get; set; }
-    public string? AssociatedApp { get; set; }
-    public FileCategory Category { get; set; }
-    
-    public string BytesFormatted => FormatBytes(Bytes);
-    public int DaysSinceAccess => (int)(DateTime.Now - LastAccessed).TotalDays;
-    
-    private static string FormatBytes(long bytes)
-    {
-        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-        int order = 0;
-        double size = bytes;
-        while (size >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-        return $"{size:0.##} {sizes[order]}";
-    }
-}
 
-public enum FileCategory
-{
-    Document,
-    Image,
-    Video,
-    Audio,
-    Archive,
-    Executable,
-    Database,
-    GameAsset,
-    CacheData,
-    TempFile,
-    SystemFile,
-    Unknown
-}
+    public string SizeFormatted => FormatBytes(SizeBytes);
 
-public class DirectorySize
-{
-    public string Path { get; set; } = "";
-    public string Name { get; set; } = "";
-    public long Bytes { get; set; }
-    public int FileCount { get; set; }
-    public int SubdirectoryCount { get; set; }
-    public DateTime LastModified { get; set; }
-    public string? AssociatedApp { get; set; }
-    public SpaceCategoryType Category { get; set; }
-    
-    public string BytesFormatted => FormatBytes(Bytes);
-    
     private static string FormatBytes(long bytes)
     {
         string[] sizes = { "B", "KB", "MB", "GB", "TB" };

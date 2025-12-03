@@ -11,7 +11,7 @@ public class DeepScanLearningService
 {
     private readonly ILogger<DeepScanLearningService> _logger;
     private readonly IDeepScanRagStore _ragStore;
-    
+
     public DeepScanLearningService(
         ILogger<DeepScanLearningService> logger,
         IDeepScanRagStore ragStore)
@@ -19,7 +19,7 @@ public class DeepScanLearningService
         _logger = logger;
         _ragStore = ragStore;
     }
-    
+
     /// <summary>
     /// Records a user's decision on an app removal recommendation.
     /// </summary>
@@ -32,7 +32,7 @@ public class DeepScanLearningService
             "Recording app decision for {AppName}: User {Decision}",
             recommendation.App?.Name,
             userApproved ? "approved" : "rejected");
-        
+
         var memory = new DeepScanMemory
         {
             Type = DeepScanMemoryType.AppRemovalDecision,
@@ -51,16 +51,16 @@ public class DeepScanLearningService
                 { "category", recommendation.App?.Category.ToString() ?? "" }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(memory);
-        
+
         // Also store as a pattern learning if this was a correction
         if (!userApproved && recommendation.Confidence > 0.7)
         {
             await StoreCorrectionPatternAsync(recommendation, userReason);
         }
     }
-    
+
     /// <summary>
     /// Records a user's decision on a file relocation recommendation.
     /// </summary>
@@ -73,7 +73,7 @@ public class DeepScanLearningService
             "Recording relocation decision for {ClusterName}: User {Decision}",
             recommendation.Cluster?.Name,
             userApproved ? "approved" : "rejected");
-        
+
         var memory = new DeepScanMemory
         {
             Type = DeepScanMemoryType.RelocationDecision,
@@ -93,16 +93,16 @@ public class DeepScanLearningService
                 { "fileCount", recommendation.Cluster?.FileCount.ToString() ?? "0" }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(memory);
-        
+
         // Learn from target drive preference
         if (userApproved && !string.IsNullOrEmpty(actualTargetDrive))
         {
             await StoreTargetDrivePreferenceAsync(recommendation, actualTargetDrive);
         }
     }
-    
+
     /// <summary>
     /// Records a user's decision on a cleanup opportunity.
     /// </summary>
@@ -114,7 +114,7 @@ public class DeepScanLearningService
             "Recording cleanup decision for {OpportunityType}: User {Decision}",
             opportunity.Type,
             userApproved ? "approved" : "rejected");
-        
+
         var memory = new DeepScanMemory
         {
             Type = DeepScanMemoryType.CleanupDecision,
@@ -133,10 +133,10 @@ public class DeepScanLearningService
                 { "risk", opportunity.Risk.ToString() }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(memory);
     }
-    
+
     /// <summary>
     /// Records user preference for future recommendations.
     /// </summary>
@@ -149,7 +149,7 @@ public class DeepScanLearningService
         _logger.LogInformation(
             "Recording user preference: {Category}.{Key} = {Value}",
             preferenceCategory, preferenceKey, preferenceValue);
-        
+
         var memory = new DeepScanMemory
         {
             Type = DeepScanMemoryType.UserPreference,
@@ -165,10 +165,10 @@ public class DeepScanLearningService
                 { "reason", reason ?? "" }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(memory);
     }
-    
+
     /// <summary>
     /// Learns a file pattern from user decision.
     /// </summary>
@@ -182,7 +182,7 @@ public class DeepScanLearningService
         _logger.LogInformation(
             "Learning file pattern: {Extension} -> {Category}/{Action} ({Approved})",
             fileExtension, category, action, userApproved);
-        
+
         var memory = new DeepScanMemory
         {
             Type = DeepScanMemoryType.FilePatternLearning,
@@ -198,10 +198,10 @@ public class DeepScanLearningService
                 { "patternContext", context ?? "" }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(memory);
     }
-    
+
     /// <summary>
     /// Learns an app category from user decision.
     /// </summary>
@@ -214,7 +214,7 @@ public class DeepScanLearningService
         _logger.LogInformation(
             "Learning app category: {AppName} -> {Category} (Essential: {IsEssential})",
             appName, category, isEssential);
-        
+
         var memory = new DeepScanMemory
         {
             Type = DeepScanMemoryType.AppCategoryLearning,
@@ -230,17 +230,17 @@ public class DeepScanLearningService
                 { "isEssential", isEssential.ToString() }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(memory);
     }
-    
+
     #region Helper Methods
-    
+
     private string BuildAppContext(AppRemovalRecommendation recommendation)
     {
         var app = recommendation.App;
         if (app == null) return "Unknown app removal recommendation";
-        
+
         var context = new System.Text.StringBuilder();
         context.AppendLine($"App: {app.Name} by {app.Publisher}");
         context.AppendLine($"Category: {app.Category}");
@@ -248,15 +248,15 @@ public class DeepScanLearningService
         context.AppendLine($"Last used: {app.DaysSinceLastUse} days ago");
         context.AppendLine($"Source: {app.Source}");
         context.AppendLine($"AI Reason: {recommendation.AiReason}");
-        
+
         return context.ToString();
     }
-    
+
     private string BuildRelocationContext(RelocationRecommendation recommendation)
     {
         var cluster = recommendation.Cluster;
         if (cluster == null) return "Unknown relocation recommendation";
-        
+
         var context = new System.Text.StringBuilder();
         context.AppendLine($"Cluster: {cluster.Name}");
         context.AppendLine($"Type: {cluster.Type}");
@@ -265,10 +265,10 @@ public class DeepScanLearningService
         context.AppendLine($"Files: {cluster.FileCount}");
         context.AppendLine($"Target: {recommendation.TargetDrive}");
         context.AppendLine($"AI Reason: {recommendation.AiReason}");
-        
+
         return context.ToString();
     }
-    
+
     private string BuildCleanupContext(CleanupOpportunity opportunity)
     {
         var context = new System.Text.StringBuilder();
@@ -279,10 +279,10 @@ public class DeepScanLearningService
         context.AppendLine($"Files affected: {opportunity.FileCount}");
         context.AppendLine($"Risk: {opportunity.Risk}");
         context.AppendLine($"AI Reason: {opportunity.AiReason}");
-        
+
         return context.ToString();
     }
-    
+
     private async Task StoreCorrectionPatternAsync(
         AppRemovalRecommendation recommendation,
         string? userReason)
@@ -300,26 +300,26 @@ public class DeepScanLearningService
             {
                 { "appName", recommendation.App?.Name ?? "" },
                 { "publisher", recommendation.App?.Publisher ?? "" },
-                { "originalReason", recommendation.AiReason },
+                { "originalReason", recommendation.AiReason ?? "" },
                 { "userCorrection", userReason ?? "" },
                 { "isCorrection", "true" }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(correctionMemory);
         _logger.LogWarning(
             "AI correction recorded: {AppName} should NOT be removed. User reason: {Reason}",
             recommendation.App?.Name,
             userReason);
     }
-    
+
     private async Task StoreTargetDrivePreferenceAsync(
         RelocationRecommendation recommendation,
         string actualTargetDrive)
     {
         if (recommendation.TargetDrive == actualTargetDrive)
             return; // No preference to learn
-        
+
         var preferenceMemory = new DeepScanMemory
         {
             Type = DeepScanMemoryType.UserPreference,
@@ -335,7 +335,7 @@ public class DeepScanLearningService
                 { "preferenceType", "target_drive" }
             }
         };
-        
+
         await _ragStore.StoreMemoryAsync(preferenceMemory);
         _logger.LogInformation(
             "Drive preference learned: {ClusterType} -> {PreferredDrive} (was: {Suggested})",
@@ -343,21 +343,21 @@ public class DeepScanLearningService
             actualTargetDrive,
             recommendation.TargetDrive);
     }
-    
+
     private string FormatSize(long bytes)
     {
         string[] sizes = { "B", "KB", "MB", "GB", "TB" };
         int order = 0;
         double size = bytes;
-        
+
         while (size >= 1024 && order < sizes.Length - 1)
         {
             order++;
             size /= 1024;
         }
-        
+
         return $"{size:0.##} {sizes[order]}";
     }
-    
+
     #endregion
 }

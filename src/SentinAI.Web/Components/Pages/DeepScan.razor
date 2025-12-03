@@ -1,5 +1,7 @@
 @page "/deep-scan"
+@rendermode InteractiveServer
 @using SentinAI.Shared.Models.DeepScan
+@using SentinAI.Web.Services.DeepScan
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @implements IDisposable
@@ -34,10 +36,10 @@
                                 {
                                     <div class="form-check form-check-inline">
                                         <input class="form-check-input" type="checkbox" 
-                                               id="drive-@drive.Letter" 
-                                               checked="@_options.TargetDrives.Contains(drive.Letter + "\\")"
+                                               id="drive-@drive.Letter.TrimEnd('\\')" 
+                                               checked="@_options.TargetDrives.Contains(drive.Letter)"
                                                @onchange="@(e => ToggleDrive(drive.Letter, (bool)e.Value!))" />
-                                        <label class="form-check-label" for="drive-@drive.Letter">
+                                        <label class="form-check-label" for="drive-@drive.Letter.TrimEnd('\\')">
                                             @drive.Letter: @drive.Label (@drive.FreeSpaceFormatted free)
                                         </label>
                                     </div>
@@ -75,6 +77,13 @@
                             }
                             <i class="bi bi-play-fill me-2"></i> Start Deep Scan
                         </button>
+                        
+                        @if (!string.IsNullOrEmpty(_errorMessage))
+                        {
+                            <div class="alert alert-danger mt-3" role="alert">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+                            </div>
+                        }
                     </div>
                 </div>
             </div>
@@ -130,10 +139,81 @@
                                 <h5 class="card-title mb-0">
                                     <i class="bi bi-clipboard-check text-success"></i> Scan Complete
                                 </h5>
-                                <button class="btn btn-outline-secondary" @onclick="ResetScan">
-                                    <i class="bi bi-arrow-counterclockwise me-1"></i> New Scan
-                                </button>
+                                <div class="btn-group">
+                                    <button class="btn btn-outline-primary" @onclick="ApproveAllSafe" disabled="@_isExecuting">
+                                        <i class="bi bi-check-all me-1"></i> Approve All Safe
+                                    </button>
+                                    <button class="btn btn-success" @onclick="ExecuteAllApproved" disabled="@(_isExecuting || GetApprovedCount() == 0)">
+                                        @if (_isExecuting)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1"></span>
+                                        }
+                                        <i class="bi bi-play-fill me-1"></i> Execute (@GetApprovedCount())
+                                    </button>
+                                    <button class="btn btn-outline-secondary" @onclick="ResetScan" disabled="@_isExecuting">
+                                        <i class="bi bi-arrow-counterclockwise me-1"></i> New Scan
+                                    </button>
+                                </div>
                             </div>
+                            
+                            @if (_executionProgress != null && _isExecuting)
+                            {
+                                <div class="alert alert-info">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span><i class="bi bi-gear-fill me-2"></i>@_executionProgress.Phase</span>
+                                        <span>@_executionProgress.CompletedItems / @_executionProgress.TotalItems</span>
+                                    </div>
+                                    <div class="progress" style="height: 20px;">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                             style="width: @_executionProgress.ProgressPercent%">
+                                            @_executionProgress.ProgressPercent.ToString("F0")%
+                                        </div>
+                                    </div>
+                                    @if (!string.IsNullOrEmpty(_executionProgress.CurrentItem))
+                                    {
+                                        <small class="text-muted mt-2 d-block text-truncate">@_executionProgress.CurrentItem</small>
+                                    }
+                                </div>
+                            }
+                            
+                            @if (_executionResult != null)
+                            {
+                                <div class="alert alert-@(_executionResult.Success ? "success" : "warning")">
+                                    <h6 class="alert-heading">
+                                        <i class="bi bi-@(_executionResult.Success ? "check-circle" : "exclamation-triangle") me-2"></i>
+                                        Execution Complete
+                                    </h6>
+                                    <p class="mb-2">@_executionResult.Message</p>
+                                    <div class="row">
+                                        <div class="col">
+                                            <small><strong>Space freed:</strong> @FormatBytes(_executionResult.BytesFreed)</small>
+                                        </div>
+                                        <div class="col">
+                                            <small><strong>Items processed:</strong> @_executionResult.ItemsProcessed</small>
+                                        </div>
+                                        <div class="col">
+                                            <small><strong>Duration:</strong> @_executionResult.Duration.TotalSeconds.ToString("F1")s</small>
+                                        </div>
+                                    </div>
+                                    @if (_executionResult.Errors.Count > 0)
+                                    {
+                                        <hr />
+                                        <details>
+                                            <summary class="text-danger">@_executionResult.ItemsFailed errors occurred</summary>
+                                            <ul class="mb-0 mt-2 small">
+                                                @foreach (var error in _executionResult.Errors.Take(5))
+                                                {
+                                                    <li>@error</li>
+                                                }
+                                                @if (_executionResult.Errors.Count > 5)
+                                                {
+                                                    <li>...and @(_executionResult.Errors.Count - 5) more</li>
+                                                }
+                                            </ul>
+                                        </details>
+                                    }
+                                </div>
+                            }
                             
                             @if (_session.Summary != null)
                             {
@@ -359,13 +439,82 @@
     private List<TargetDriveInfo> _availableDrives = new();
     private DeepScanLearningStats? _learningStats;
     private bool _isStarting;
+    private bool _isExecuting;
     private string _activeTab = "apps";
+    private string? _errorMessage;
     private System.Threading.Timer? _pollTimer;
+    private List<DeepScanSessionSummary> _sessionHistory = new();
+    private ExecutionProgress? _executionProgress;
+    private ExecutionResult? _executionResult;
 
     protected override async Task OnInitializedAsync()
     {
         await LoadDrivesAsync();
         await LoadLearningStatsAsync();
+        await LoadLatestSessionAsync();
+        await LoadSessionHistoryAsync();
+    }
+
+    private async Task LoadLatestSessionAsync()
+    {
+        try
+        {
+            var session = await Http.GetFromJsonAsync<DeepScanSession>("api/deepscan/latest");
+            if (session != null)
+            {
+                _session = session;
+                
+                // If the session is still in progress, start polling
+                if (_session.State != DeepScanState.AwaitingApproval &&
+                    _session.State != DeepScanState.Completed &&
+                    _session.State != DeepScanState.Failed &&
+                    _session.State != DeepScanState.Cancelled)
+                {
+                    _pollTimer = new System.Threading.Timer(async _ =>
+                    {
+                        await InvokeAsync(async () =>
+                        {
+                            await PollProgressAsync();
+                            StateHasChanged();
+                        });
+                    }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
+                }
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // No previous session, this is expected
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load latest session: {ex.Message}");
+        }
+    }
+
+    private async Task LoadSessionHistoryAsync()
+    {
+        try
+        {
+            var history = await Http.GetFromJsonAsync<List<DeepScanSessionSummary>>("api/deepscan/history?limit=5");
+            _sessionHistory = history ?? new();
+        }
+        catch { }
+    }
+
+    private async Task LoadSessionAsync(Guid sessionId)
+    {
+        try
+        {
+            var session = await Http.GetFromJsonAsync<DeepScanSession>($"api/deepscan/{sessionId}");
+            if (session != null)
+            {
+                _session = session;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load session: {ex.Message}");
+        }
     }
 
     private async Task LoadDrivesAsync()
@@ -375,10 +524,11 @@
             var response = await Http.GetFromJsonAsync<List<TargetDriveInfo>>("api/deepscan/drives");
             _availableDrives = response ?? new();
             
-            // Default to C: if available
-            if (_availableDrives.Any(d => d.Letter == "C"))
+            // Default to C:\ if available (Letter already includes backslash like "C:\\")
+            var cDrive = _availableDrives.FirstOrDefault(d => d.Letter.StartsWith("C", StringComparison.OrdinalIgnoreCase));
+            if (cDrive != null)
             {
-                _options.TargetDrives = new List<string> { "C:\\" };
+                _options.TargetDrives = new List<string> { cDrive.Letter };
             }
         }
         catch (Exception ex)
@@ -396,40 +546,58 @@
         catch { }
     }
 
-    private void ToggleDrive(string letter, bool include)
+    private void ToggleDrive(string drivePath, bool include)
     {
-        var path = letter + ":\\";
-        if (include && !_options.TargetDrives.Contains(path))
+        // drivePath already contains full path like "C:\\"
+        if (include && !_options.TargetDrives.Contains(drivePath))
         {
-            _options.TargetDrives.Add(path);
+            _options.TargetDrives.Add(drivePath);
         }
         else if (!include)
         {
-            _options.TargetDrives.Remove(path);
+            _options.TargetDrives.Remove(drivePath);
         }
     }
 
     private async Task StartScan()
     {
         _isStarting = true;
+        _errorMessage = null;
+        _executionResult = null;
+        StateHasChanged();
+        
         try
         {
             var response = await Http.PostAsJsonAsync("api/deepscan/start", _options);
-            _session = await response.Content.ReadFromJsonAsync<DeepScanSession>();
-            
-            // Start polling for progress
-            _pollTimer = new System.Threading.Timer(async _ =>
+            if (response.IsSuccessStatusCode)
             {
-                await PollProgressAsync();
-            }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
+                _session = await response.Content.ReadFromJsonAsync<DeepScanSession>();
+                
+                // Start polling for progress
+                _pollTimer = new System.Threading.Timer(async _ =>
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await PollProgressAsync();
+                        StateHasChanged();
+                    });
+                }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                _errorMessage = $"Failed to start scan: {error}";
+            }
         }
         catch (Exception ex)
         {
+            _errorMessage = $"Failed to start scan: {ex.Message}";
             Console.WriteLine($"Failed to start scan: {ex.Message}");
         }
         finally
         {
             _isStarting = false;
+            StateHasChanged();
         }
     }
 
@@ -474,8 +642,78 @@
     private void ResetScan()
     {
         _session = null;
+        _executionResult = null;
+        _executionProgress = null;
         _pollTimer?.Dispose();
         _pollTimer = null;
+    }
+
+    private int GetApprovedCount()
+    {
+        if (_session == null) return 0;
+        
+        var count = 0;
+        count += _session.CleanupOpportunities?.Count(o => o.Status == RecommendationStatus.Approved) ?? 0;
+        count += _session.AppRemovalRecommendations?.Count(r => r.Status == RecommendationStatus.Approved) ?? 0;
+        count += _session.RelocationRecommendations?.Count(r => r.Status == RecommendationStatus.Approved) ?? 0;
+        return count;
+    }
+
+    private async Task ApproveAllSafe()
+    {
+        if (_session == null) return;
+        
+        try
+        {
+            var response = await Http.PostAsync($"api/deepscan/{_session.Id}/approve-safe", null);
+            if (response.IsSuccessStatusCode)
+            {
+                // Reload session to get updated statuses
+                await LoadSessionAsync(_session.Id);
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to approve safe items: {ex.Message}");
+        }
+    }
+
+    private async Task ExecuteAllApproved()
+    {
+        if (_session == null) return;
+        
+        _isExecuting = true;
+        _executionResult = null;
+        _executionProgress = new ExecutionProgress { Phase = "Starting execution..." };
+        StateHasChanged();
+        
+        try
+        {
+            var response = await Http.PostAsync($"api/deepscan/{_session.Id}/execute/all", null);
+            if (response.IsSuccessStatusCode)
+            {
+                _executionResult = await response.Content.ReadFromJsonAsync<ExecutionResult>();
+                
+                // Reload session to get updated statuses
+                await LoadSessionAsync(_session.Id);
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                _errorMessage = $"Execution failed: {error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Execution failed: {ex.Message}";
+        }
+        finally
+        {
+            _isExecuting = false;
+            _executionProgress = null;
+            StateHasChanged();
+        }
     }
 
     private async Task ApproveApp(AppRemovalRecommendation rec)
@@ -543,5 +781,26 @@
     public void Dispose()
     {
         _pollTimer?.Dispose();
+    }
+
+    // DTOs for execution
+    private class ExecutionProgress
+    {
+        public string Phase { get; set; } = "Initializing";
+        public int TotalItems { get; set; }
+        public int CompletedItems { get; set; }
+        public string CurrentItem { get; set; } = string.Empty;
+        public double ProgressPercent => TotalItems > 0 ? (double)CompletedItems / TotalItems * 100 : 0;
+    }
+
+    private class ExecutionResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public long BytesFreed { get; set; }
+        public int ItemsProcessed { get; set; }
+        public int ItemsFailed { get; set; }
+        public List<string> Errors { get; set; } = new();
+        public TimeSpan Duration { get; set; }
     }
 }

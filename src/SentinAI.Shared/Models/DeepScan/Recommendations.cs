@@ -1,32 +1,87 @@
 namespace SentinAI.Shared.Models.DeepScan;
 
 /// <summary>
-/// Represents a recommendation to relocate files to another drive.
+/// Recommendation for app removal.
+/// </summary>
+public class AppRemovalRecommendation
+{
+    public InstalledApp? App { get; set; }
+    public bool ShouldRemove { get; set; }
+    public double Confidence { get; set; }
+    public AppRemovalCategory Category { get; set; }
+    public string? AiReason { get; set; }
+
+    // Actions available
+    public bool CanUninstall { get; set; }
+    public bool CanClearData { get; set; }
+    public bool CanClearCache { get; set; }
+
+    // Potential savings
+    public long UninstallSavings { get; set; }
+    public long DataClearSavings { get; set; }
+    public long CacheClearSavings { get; set; }
+    public long TotalPotentialSavings => UninstallSavings + DataClearSavings + CacheClearSavings;
+
+    // Learning context
+    public int SimilarPastDecisions { get; set; }
+    public string? LearnedInfluence { get; set; }
+    public bool LearnedFromPast => SimilarPastDecisions > 0;
+
+    // Status tracking
+    public RecommendationStatus Status { get; set; } = RecommendationStatus.Pending;
+
+    // Formatted properties
+    public string TotalSavingsFormatted => FormatBytes(TotalPotentialSavings);
+    public string ConfidenceFormatted => $"{Confidence:P0}";
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+}
+
+/// <summary>
+/// Category for app removal recommendation.
+/// </summary>
+public enum AppRemovalCategory
+{
+    KeepRecommended,
+    Optional,
+    Unused,
+    LargeUnused,
+    Bloatware,
+    Redundant,
+    OutdatedVersion
+}
+
+/// <summary>
+/// Recommendation for file relocation.
 /// </summary>
 public class RelocationRecommendation
 {
-    public string Id { get; set; } = Guid.NewGuid().ToString();
-    public FileCluster Cluster { get; set; } = new();
-    
+    public FileCluster? Cluster { get; set; }
     public bool ShouldRelocate { get; set; }
+    public int Priority { get; set; } = 1; // 1-5, higher = more important
     public string? TargetDrive { get; set; }
-    public string? TargetPath { get; set; }
-    public int Priority { get; set; } // 1-5, 5 = highest priority
     public double Confidence { get; set; }
-    
     public bool RequiresJunction { get; set; }
-    public string? JunctionSource { get; set; }
-    
-    public string AiReason { get; set; } = "";
-    public string? LearnedInfluence { get; set; }
+    public string? AiReason { get; set; }
+
+    // Learning context
     public int SimilarPastDecisions { get; set; }
-    public bool LearnedFromPast => SimilarPastDecisions > 0;
-    
-    // Execution status
+    public string? LearnedInfluence { get; set; }
+
+    // Status tracking
     public RecommendationStatus Status { get; set; } = RecommendationStatus.Pending;
-    public string? Error { get; set; }
-    
-    // For UI
+
     public string PriorityLabel => Priority switch
     {
         5 => "Critical",
@@ -35,72 +90,10 @@ public class RelocationRecommendation
         2 => "Low",
         _ => "Optional"
     };
-    
-    public string ConfidenceFormatted => $"{Confidence:P0}";
 }
 
 /// <summary>
-/// Represents a recommendation to remove an application.
-/// </summary>
-public class AppRemovalRecommendation
-{
-    public string Id { get; set; } = Guid.NewGuid().ToString();
-    public InstalledApp App { get; set; } = new();
-    
-    public bool ShouldRemove { get; set; }
-    public AppRemovalCategory Category { get; set; }
-    public double Confidence { get; set; }
-    
-    public string AiReason { get; set; } = "";
-    public string? LearnedInfluence { get; set; }
-    public int SimilarPastDecisions { get; set; }
-    public bool LearnedFromPast => SimilarPastDecisions > 0;
-    
-    // What can be done
-    public bool CanUninstall { get; set; }
-    public bool CanClearData { get; set; }
-    public bool CanClearCache { get; set; }
-    
-    // Space savings
-    public long UninstallSavings { get; set; }
-    public long DataClearSavings { get; set; }
-    public long CacheClearSavings { get; set; }
-    public long TotalPotentialSavings => UninstallSavings + DataClearSavings + CacheClearSavings;
-    
-    public string UninstallSavingsFormatted => FormatBytes(UninstallSavings);
-    public string TotalSavingsFormatted => FormatBytes(TotalPotentialSavings);
-    public string ConfidenceFormatted => $"{Confidence:P0}";
-    
-    // Execution status
-    public RecommendationStatus Status { get; set; } = RecommendationStatus.Pending;
-    public string? Error { get; set; }
-    
-    private static string FormatBytes(long bytes)
-    {
-        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-        int order = 0;
-        double size = bytes;
-        while (size >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-        return $"{size:0.##} {sizes[order]}";
-    }
-}
-
-public enum AppRemovalCategory
-{
-    Bloatware,      // Pre-installed unnecessary apps
-    Unused,         // Not accessed in 90+ days
-    Redundant,      // Multiple apps doing same thing
-    LargeUnused,    // Large apps that are unused
-    Optional,       // Could be removed but might be useful
-    KeepRecommended // AI recommends keeping
-}
-
-/// <summary>
-/// Represents a cleanup opportunity (cache, temp, etc.).
+/// Opportunity for cleanup.
 /// </summary>
 public class CleanupOpportunity
 {
@@ -108,34 +101,19 @@ public class CleanupOpportunity
     public CleanupType Type { get; set; }
     public string Path { get; set; } = "";
     public string Description { get; set; } = "";
-    
     public long Bytes { get; set; }
     public int FileCount { get; set; }
-    public double Confidence { get; set; }
     public CleanupRisk Risk { get; set; }
-    
     public string? AssociatedApp { get; set; }
-    public string AiReason { get; set; } = "";
-    public string? LearnedInfluence { get; set; }
-    public int SimilarPastDecisions { get; set; }
-    public bool LearnedFromPast => SimilarPastDecisions > 0;
-    
-    // Execution status
+    public double Confidence { get; set; } = 0.8;
+    public string? AiReason { get; set; }
+
+    // Status tracking
     public RecommendationStatus Status { get; set; } = RecommendationStatus.Pending;
-    public string? Error { get; set; }
-    
+
+    // Formatted properties
     public string BytesFormatted => FormatBytes(Bytes);
-    public string ConfidenceFormatted => $"{Confidence:P0}";
-    
-    public string RiskLabel => Risk switch
-    {
-        CleanupRisk.None => "Safe",
-        CleanupRisk.Low => "Low Risk",
-        CleanupRisk.Medium => "Medium Risk",
-        CleanupRisk.High => "High Risk",
-        _ => "Unknown"
-    };
-    
+    public string RiskLabel => Risk.ToString();
     public string RiskColor => Risk switch
     {
         CleanupRisk.None => "#28a745",
@@ -144,7 +122,7 @@ public class CleanupOpportunity
         CleanupRisk.High => "#dc3545",
         _ => "#6c757d"
     };
-    
+
     private static string FormatBytes(long bytes)
     {
         string[] sizes = { "B", "KB", "MB", "GB", "TB" };
@@ -159,41 +137,86 @@ public class CleanupOpportunity
     }
 }
 
+/// <summary>
+/// Type of cleanup opportunity.
+/// </summary>
 public enum CleanupType
 {
     WindowsTemp,
     UserTemp,
     BrowserCache,
-    BrowserHistory,
-    AppCache,
-    AppLogs,
-    WindowsUpdateCache,
-    SystemRestorePoints,
     ThumbnailCache,
-    FontCache,
-    InstallerCache,
-    CrashDumps,
-    OldDownloads,
+    WindowsUpdateCache,
     RecycleBin,
-    DeveloperCache,     // npm cache, nuget cache, etc.
-    GameCache
+    AppCache,
+    LogFiles,
+    OldDownloads,
+    DuplicateFiles,
+    EmptyFolders,
+    Other
 }
 
+/// <summary>
+/// Risk level for cleanup operations.
+/// </summary>
 public enum CleanupRisk
 {
-    None,       // Absolutely safe
-    Low,        // Minor inconvenience if wrong
-    Medium,     // May need to re-download/reconfigure
-    High        // Could cause app issues
+    None,
+    Low,
+    Medium,
+    High
 }
 
+/// <summary>
+/// Status of a recommendation.
+/// </summary>
 public enum RecommendationStatus
 {
     Pending,
     Approved,
     Rejected,
-    Executing,
-    Completed,
-    Failed,
-    RolledBack
+    Executed,
+    Failed
+}
+
+/// <summary>
+/// Group of duplicate files.
+/// </summary>
+public class DuplicateGroup
+{
+    public string Hash { get; set; } = "";
+    public long FileSize { get; set; }
+    public List<DuplicateFileEntry> Files { get; set; } = new();
+
+    public int DuplicateCount => Files.Count - 1;
+    public long WastedBytes => FileSize * DuplicateCount;
+    public string WastedBytesFormatted => FormatBytes(WastedBytes);
+    public string FileSizeFormatted => FormatBytes(FileSize);
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+}
+
+/// <summary>
+/// Entry in a duplicate file group.
+/// </summary>
+public class DuplicateFileEntry
+{
+    public string Path { get; set; } = "";
+    public string Name { get; set; } = "";
+    public DateTime LastAccessed { get; set; }
+    public DateTime LastModified { get; set; }
+    public string DriveLetter { get; set; } = "";
+    public int LocationPriority { get; set; } // Lower = more important location
+    public bool IsSelected { get; set; }
 }
