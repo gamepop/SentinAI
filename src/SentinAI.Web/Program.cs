@@ -85,7 +85,40 @@ builder.Services.AddSingleton<FileSystemScanner>();
 builder.Services.AddSingleton<AppDiscoveryService>();
 builder.Services.AddSingleton<DriveManagerService>();
 builder.Services.AddSingleton<SpaceAnalysisService>();
-builder.Services.AddSingleton<IDeepScanRagStore, InMemoryDeepScanRagStore>();
+
+// Configure Deep Scan RAG store (Weaviate or in-memory fallback)
+builder.Services.Configure<DeepScanRagStoreOptions>(
+    builder.Configuration.GetSection(DeepScanRagStoreOptions.SectionName));
+builder.Services.AddHttpClient("DeepScanWeaviate", (sp, client) =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DeepScanRagStoreOptions>>().Value;
+    if (!string.IsNullOrWhiteSpace(options.Endpoint))
+    {
+        client.BaseAddress = new Uri(options.Endpoint);
+    }
+    if (!string.IsNullOrWhiteSpace(options.ApiKey))
+    {
+        client.DefaultRequestHeaders.Remove("Authorization");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"Bearer {options.ApiKey}");
+    }
+});
+builder.Services.AddSingleton<InMemoryDeepScanRagStore>();
+builder.Services.AddSingleton<IDeepScanRagStore>(sp =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DeepScanRagStoreOptions>>().Value;
+    if (!options.Enabled)
+    {
+        return sp.GetRequiredService<InMemoryDeepScanRagStore>();
+    }
+    var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+    var httpClient = httpClientFactory.CreateClient("DeepScanWeaviate");
+    var logger = sp.GetRequiredService<ILogger<WeaviateDeepScanRagStore>>();
+    return new WeaviateDeepScanRagStore(
+        httpClient,
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DeepScanRagStoreOptions>>(),
+        logger);
+});
+
 builder.Services.AddSingleton<IDeepScanSessionStore, FileBasedDeepScanSessionStore>();
 builder.Services.AddSingleton<DeepScanBrainAnalyzer>();
 builder.Services.AddSingleton<DeepScanLearningService>();

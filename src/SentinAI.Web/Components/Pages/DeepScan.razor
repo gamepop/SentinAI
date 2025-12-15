@@ -718,32 +718,42 @@
 
     private async Task ApproveApp(AppRemovalRecommendation rec)
     {
-        await SubmitFeedback("feedback/app", new { Recommendation = rec, UserApproved = true });
+        if (_session == null || rec.App == null) return;
+        await Http.PostAsJsonAsync($"api/deepscan/{_session.Id}/app/{rec.App.Id}/status", new { Approved = true });
         rec.Status = RecommendationStatus.Approved;
+        StateHasChanged();
     }
 
     private async Task RejectApp(AppRemovalRecommendation rec)
     {
-        await SubmitFeedback("feedback/app", new { Recommendation = rec, UserApproved = false });
+        if (_session == null || rec.App == null) return;
+        await Http.PostAsJsonAsync($"api/deepscan/{_session.Id}/app/{rec.App.Id}/status", new { Approved = false });
         rec.Status = RecommendationStatus.Rejected;
+        StateHasChanged();
     }
 
     private async Task ApproveRelocation(RelocationRecommendation rec)
     {
-        await SubmitFeedback("feedback/relocation", new { Recommendation = rec, UserApproved = true });
+        if (_session == null || rec.Cluster == null) return;
+        await Http.PostAsJsonAsync($"api/deepscan/{_session.Id}/relocation/{rec.Cluster.Id}/status", new { Approved = true });
         rec.Status = RecommendationStatus.Approved;
+        StateHasChanged();
     }
 
     private async Task RejectRelocation(RelocationRecommendation rec)
     {
-        await SubmitFeedback("feedback/relocation", new { Recommendation = rec, UserApproved = false });
+        if (_session == null || rec.Cluster == null) return;
+        await Http.PostAsJsonAsync($"api/deepscan/{_session.Id}/relocation/{rec.Cluster.Id}/status", new { Approved = false });
         rec.Status = RecommendationStatus.Rejected;
+        StateHasChanged();
     }
 
     private async Task ApproveCleanup(CleanupOpportunity opp)
     {
-        await SubmitFeedback("feedback/cleanup", new { Opportunity = opp, UserApproved = true });
+        if (_session == null) return;
+        await Http.PostAsJsonAsync($"api/deepscan/{_session.Id}/cleanup/{opp.Id}/status", new { Approved = true });
         opp.Status = RecommendationStatus.Approved;
+        StateHasChanged();
     }
 
     private async Task SubmitFeedback(string endpoint, object feedback)

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntimeGenAI;
 using SentinAI.Shared.Models;
+using SentinAI.Shared.Models.DeepScan;
 using SentinAI.Web.Services.Rag;
 
 namespace SentinAI.Web.Services;
@@ -33,6 +34,24 @@ public interface IAgentBrain
     /// Gets statistics about brain usage
     /// </summary>
     (int TotalAnalyses, int ModelDecisions, int HeuristicOnly, int SafeToDeleteCount) GetStats();
+
+    /// <summary>
+    /// Analyzes an app for removal using AI with RAG context.
+    /// </summary>
+    Task<DeepScanAiDecision> AnalyzeAppRemovalAsync(
+        InstalledApp app,
+        List<DeepScanMemory> similarDecisions,
+        AppRemovalPattern publisherPattern,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Analyzes files for relocation using AI with RAG context.
+    /// </summary>
+    Task<DeepScanAiDecision> AnalyzeRelocationAsync(
+        FileCluster cluster,
+        List<DeepScanMemory> similarDecisions,
+        FileRelocationPattern fileTypePattern,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -733,6 +752,408 @@ public class AgentBrain : IAgentBrain, IDisposable
 
         return suggestions;
     }
+
+    #region Deep Scan AI Analysis
+
+    public async Task<DeepScanAiDecision> AnalyzeAppRemovalAsync(
+        InstalledApp app,
+        List<DeepScanMemory> similarDecisions,
+        AppRemovalPattern publisherPattern,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _totalAnalyses++;
+
+        _logger.LogDebug("🔍 Analyzing app for removal: {App}", app.Name);
+
+        // If model not loaded, return heuristic-based decision
+        if (!_isModelLoaded || _model == null || _tokenizer == null)
+        {
+            _heuristicOnly++;
+            return CreateAppHeuristicDecision(app, similarDecisions, publisherPattern);
+        }
+
+        try
+        {
+            var prompt = BuildAppRemovalPrompt(app, similarDecisions, publisherPattern);
+            var aiResult = await RunInferenceAsync(prompt, cancellationToken);
+            var decision = ParseAppRemovalResponse(aiResult, app);
+            _modelDecisions++;
+            return decision;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI inference failed for app {App}, falling back to heuristics", app.Name);
+            _heuristicOnly++;
+            return CreateAppHeuristicDecision(app, similarDecisions, publisherPattern);
+        }
+    }
+
+    public async Task<DeepScanAiDecision> AnalyzeRelocationAsync(
+        FileCluster cluster,
+        List<DeepScanMemory> similarDecisions,
+        FileRelocationPattern fileTypePattern,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _totalAnalyses++;
+
+        _logger.LogDebug("🔍 Analyzing files for relocation: {Path}", cluster.BasePath);
+
+        // If model not loaded, return heuristic-based decision
+        if (!_isModelLoaded || _model == null || _tokenizer == null)
+        {
+            _heuristicOnly++;
+            return CreateRelocationHeuristicDecision(cluster, similarDecisions, fileTypePattern);
+        }
+
+        try
+        {
+            var prompt = BuildRelocationPrompt(cluster, similarDecisions, fileTypePattern);
+            var aiResult = await RunInferenceAsync(prompt, cancellationToken);
+            var decision = ParseRelocationResponse(aiResult, cluster, fileTypePattern);
+            _modelDecisions++;
+            return decision;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI inference failed for cluster {Path}, falling back to heuristics", cluster.BasePath);
+            _heuristicOnly++;
+            return CreateRelocationHeuristicDecision(cluster, similarDecisions, fileTypePattern);
+        }
+    }
+
+    private string BuildAppRemovalPrompt(InstalledApp app, List<DeepScanMemory> memories, AppRemovalPattern pattern)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<|system|>");
+        sb.AppendLine("You are SentinAI, a Windows storage optimization assistant. Analyze whether an app should be removed.");
+        sb.AppendLine("Consider: bloatware status, system requirements, usage patterns, size impact, user learning patterns.");
+        sb.AppendLine("Respond ONLY with JSON: {\"should_remove\":true/false,\"confidence\":0.0-1.0,\"category\":\"Bloatware|Unused|LargeUnused|KeepRecommended|Optional\",\"reason\":\"brief reason\"}");
+        sb.AppendLine("<|end|>");
+        sb.AppendLine("<|user|>");
+        sb.AppendLine($"App: {app.Name}");
+        sb.AppendLine($"Publisher: {app.Publisher}");
+        sb.AppendLine($"Size: {app.TotalSizeFormatted}");
+        sb.AppendLine($"Is Bloatware: {app.IsBloatware}");
+        sb.AppendLine($"Is System App: {app.IsSystemApp}");
+        sb.AppendLine($"Days Since Last Use: {app.DaysSinceLastUse}");
+
+        if (memories.Count > 0)
+        {
+            var agreementRate = memories.Count(m => m.UserAgreed) * 100 / memories.Count;
+            sb.AppendLine($"Similar past decisions: {memories.Count} ({agreementRate}% user agreement)");
+        }
+
+        if (pattern.TotalDecisions > 0)
+        {
+            sb.AppendLine($"Publisher pattern: {pattern.RemovalRate:P0} apps from this publisher were removed");
+        }
+
+        sb.AppendLine("<|end|>");
+        sb.AppendLine("<|assistant|>");
+
+        return sb.ToString();
+    }
+
+    private string BuildRelocationPrompt(FileCluster cluster, List<DeepScanMemory> memories, FileRelocationPattern pattern)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<|system|>");
+        sb.AppendLine("You are SentinAI. Analyze whether files should be relocated to free up space on the primary drive.");
+        sb.AppendLine("Consider: file type, cluster size, user preferences for file locations, available drives.");
+        sb.AppendLine("Respond ONLY with JSON: {\"should_relocate\":true/false,\"priority\":1-5,\"target_drive\":\"X:\",\"confidence\":0.0-1.0,\"reason\":\"brief reason\"}");
+        sb.AppendLine("<|end|>");
+        sb.AppendLine("<|user|>");
+        sb.AppendLine($"Cluster: {cluster.Name}");
+        sb.AppendLine($"Type: {cluster.Type}");
+        sb.AppendLine($"Size: {cluster.TotalSizeFormatted}");
+        sb.AppendLine($"Source Drive: {cluster.BasePath?.Substring(0, 2)}");
+
+        var availableDrives = string.Join(", ", cluster.AvailableDrives.Select(d => $"{d.Letter} ({d.FreeSpaceFormatted} free)"));
+        sb.AppendLine($"Available Target Drives: {availableDrives}");
+
+        if (!string.IsNullOrEmpty(pattern.PreferredTargetDrive))
+        {
+            sb.AppendLine($"User preference: {pattern.PreferredTargetDrive} for {cluster.PrimaryFileType} files");
+        }
+
+        if (memories.Count > 0)
+        {
+            sb.AppendLine($"Similar past decisions: {memories.Count}");
+        }
+
+        sb.AppendLine("<|end|>");
+        sb.AppendLine("<|assistant|>");
+
+        return sb.ToString();
+    }
+
+    private async Task<string> RunInferenceAsync(string prompt, CancellationToken cancellationToken)
+    {
+        await _modelLock.WaitAsync(cancellationToken);
+        try
+        {
+            var sequences = _tokenizer!.Encode(prompt);
+            var inputLength = sequences.NumSequences > 0 ? sequences[0].Length : 0;
+
+            var maxInputLength = _config.MaxSequenceLength - _config.MaxOutputTokens;
+            if (inputLength >= maxInputLength)
+            {
+                throw new InvalidOperationException($"Input too long ({inputLength} tokens)");
+            }
+
+            using var generatorParams = new GeneratorParams(_model!);
+            generatorParams.SetSearchOption("max_length", _config.MaxSequenceLength);
+            generatorParams.SetSearchOption("temperature", _config.Temperature);
+            generatorParams.SetSearchOption("top_p", 0.9);
+            generatorParams.SetInputSequences(sequences);
+
+            var outputTokens = new List<int>();
+            var timeoutMs = _config.InferenceTimeoutSeconds * 1000;
+
+            using var generator = new Generator(_model!, generatorParams);
+            var sw = Stopwatch.StartNew();
+
+            while (!generator.IsDone())
+            {
+                generator.ComputeLogits();
+                generator.GenerateNextToken();
+
+                var seq = generator.GetSequence(0);
+                if (seq.Length > 0)
+                {
+                    outputTokens.Add(seq[^1]);
+                }
+
+                if (sw.ElapsedMilliseconds > timeoutMs)
+                {
+                    _logger.LogWarning("AI generation timeout after {Timeout}s", _config.InferenceTimeoutSeconds);
+                    break;
+                }
+            }
+
+            return _tokenizer!.Decode(outputTokens.ToArray());
+        }
+        finally
+        {
+            _modelLock.Release();
+        }
+    }
+
+    private DeepScanAiDecision ParseAppRemovalResponse(string response, InstalledApp app)
+    {
+        try
+        {
+            var jsonStart = response.IndexOf('{');
+            var jsonEnd = response.LastIndexOf('}');
+
+            if (jsonStart >= 0 && jsonEnd > jsonStart)
+            {
+                var jsonStr = response.Substring(jsonStart, jsonEnd - jsonStart + 1);
+                using var doc = JsonDocument.Parse(jsonStr);
+                var root = doc.RootElement;
+
+                var shouldRemove = root.TryGetProperty("should_remove", out var removeProp) && removeProp.GetBoolean();
+                var confidence = root.TryGetProperty("confidence", out var confProp) ? confProp.GetDouble() : 0.5;
+                var category = root.TryGetProperty("category", out var catProp) ? catProp.GetString() : "Optional";
+                var reason = root.TryGetProperty("reason", out var reasonProp) ? reasonProp.GetString() ?? "" : "";
+
+                _logger.LogInformation("🎯 AI app decision: remove={Remove}, confidence={Conf:P0}, category={Category}",
+                    shouldRemove, confidence, category);
+
+                return new DeepScanAiDecision
+                {
+                    ShouldProceed = shouldRemove,
+                    Confidence = confidence,
+                    Category = category,
+                    Reason = $"[AI] {reason}",
+                    IsAiDecision = true
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse AI response for app {App}", app.Name);
+        }
+
+        // Fallback to heuristic
+        return CreateAppHeuristicDecision(app, new List<DeepScanMemory>(), new AppRemovalPattern());
+    }
+
+    private DeepScanAiDecision ParseRelocationResponse(string response, FileCluster cluster, FileRelocationPattern pattern)
+    {
+        try
+        {
+            var jsonStart = response.IndexOf('{');
+            var jsonEnd = response.LastIndexOf('}');
+
+            if (jsonStart >= 0 && jsonEnd > jsonStart)
+            {
+                var jsonStr = response.Substring(jsonStart, jsonEnd - jsonStart + 1);
+                using var doc = JsonDocument.Parse(jsonStr);
+                var root = doc.RootElement;
+
+                var shouldRelocate = root.TryGetProperty("should_relocate", out var relocateProp) && relocateProp.GetBoolean();
+                var priority = root.TryGetProperty("priority", out var priProp) ? priProp.GetInt32() : 3;
+                var targetDrive = root.TryGetProperty("target_drive", out var driveProp) ? driveProp.GetString() : null;
+                var confidence = root.TryGetProperty("confidence", out var confProp) ? confProp.GetDouble() : 0.5;
+                var reason = root.TryGetProperty("reason", out var reasonProp) ? reasonProp.GetString() ?? "" : "";
+
+                _logger.LogInformation("🎯 AI relocation decision: relocate={Relocate}, priority={Priority}, target={Target}",
+                    shouldRelocate, priority, targetDrive);
+
+                return new DeepScanAiDecision
+                {
+                    ShouldProceed = shouldRelocate,
+                    Confidence = confidence,
+                    Priority = priority,
+                    TargetDrive = targetDrive,
+                    Reason = $"[AI] {reason}",
+                    IsAiDecision = true
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse AI response for cluster {Path}", cluster.BasePath);
+        }
+
+        // Fallback to heuristic
+        return CreateRelocationHeuristicDecision(cluster, new List<DeepScanMemory>(), pattern);
+    }
+
+    private DeepScanAiDecision CreateAppHeuristicDecision(InstalledApp app, List<DeepScanMemory> memories, AppRemovalPattern pattern)
+    {
+        // Bloatware detection
+        if (app.IsBloatware)
+        {
+            return new DeepScanAiDecision
+            {
+                ShouldProceed = true,
+                Confidence = 0.9,
+                Category = "Bloatware",
+                Reason = "[Heuristic] Detected as bloatware/pre-installed unnecessary software",
+                IsAiDecision = false
+            };
+        }
+
+        // System app protection
+        if (app.IsSystemApp)
+        {
+            return new DeepScanAiDecision
+            {
+                ShouldProceed = false,
+                Confidence = 0.95,
+                Category = "KeepRecommended",
+                Reason = "[Heuristic] System app - required for Windows functionality",
+                IsAiDecision = false
+            };
+        }
+
+        // Publisher pattern
+        if (pattern.TotalDecisions >= 3 && pattern.RemovalRate > 0.8)
+        {
+            return new DeepScanAiDecision
+            {
+                ShouldProceed = true,
+                Confidence = 0.85,
+                Category = "Bloatware",
+                Reason = $"[Heuristic] User typically removes apps from {app.Publisher} ({pattern.RemovalRate:P0} removal rate)",
+                IsAiDecision = false
+            };
+        }
+
+        // Unused apps
+        if (app.IsUnused && app.DaysSinceLastUse > 90)
+        {
+            var confidence = app.DaysSinceLastUse > 180 ? 0.85 : 0.7;
+            return new DeepScanAiDecision
+            {
+                ShouldProceed = true,
+                Confidence = confidence,
+                Category = "Unused",
+                Reason = $"[Heuristic] Not used in {app.DaysSinceLastUse} days",
+                IsAiDecision = false
+            };
+        }
+
+        // Large unused apps
+        if (app.TotalSizeBytes > 1024L * 1024 * 1024 && app.IsUnused)
+        {
+            return new DeepScanAiDecision
+            {
+                ShouldProceed = true,
+                Confidence = 0.75,
+                Category = "LargeUnused",
+                Reason = $"[Heuristic] Large app ({app.TotalSizeFormatted}) not used in {app.DaysSinceLastUse} days",
+                IsAiDecision = false
+            };
+        }
+
+        // Default: keep
+        return new DeepScanAiDecision
+        {
+            ShouldProceed = false,
+            Confidence = 0.6,
+            Category = "Optional",
+            Reason = "[Heuristic] App appears to be in use or recently accessed",
+            IsAiDecision = false
+        };
+    }
+
+    private DeepScanAiDecision CreateRelocationHeuristicDecision(FileCluster cluster, List<DeepScanMemory> memories, FileRelocationPattern pattern)
+    {
+        if (!cluster.CanRelocate)
+        {
+            return new DeepScanAiDecision
+            {
+                ShouldProceed = false,
+                Confidence = 0.95,
+                Priority = 1,
+                Reason = "[Heuristic] Files cannot be safely relocated",
+                IsAiDecision = false
+            };
+        }
+
+        // Determine priority by size
+        int priority;
+        if (cluster.TotalBytes > 50L * 1024 * 1024 * 1024)
+            priority = 5;
+        else if (cluster.TotalBytes > 10L * 1024 * 1024 * 1024)
+            priority = 4;
+        else if (cluster.TotalBytes > 1L * 1024 * 1024 * 1024)
+            priority = 3;
+        else
+            priority = 2;
+
+        // Determine target drive
+        var targetDrive = !string.IsNullOrEmpty(pattern.PreferredTargetDrive)
+            ? pattern.PreferredTargetDrive
+            : cluster.AvailableDrives.FirstOrDefault()?.Letter;
+
+        var reason = cluster.Type switch
+        {
+            FileClusterType.MediaVideos => $"[Heuristic] Large video files ({cluster.TotalSizeFormatted}) - good candidate for relocation",
+            FileClusterType.MediaPhotos => $"[Heuristic] Photo collection ({cluster.TotalSizeFormatted}) - can be moved to free space",
+            FileClusterType.GameAssets => $"[Heuristic] Game files ({cluster.TotalSizeFormatted}) - relocatable with junction",
+            FileClusterType.Downloads => $"[Heuristic] Downloads folder ({cluster.TotalSizeFormatted}) - consider organizing",
+            FileClusterType.Archives => $"[Heuristic] Archive files ({cluster.TotalSizeFormatted}) - safe to relocate",
+            _ => $"[Heuristic] Files ({cluster.TotalSizeFormatted}) can be relocated to free space"
+        };
+
+        return new DeepScanAiDecision
+        {
+            ShouldProceed = targetDrive != null,
+            Confidence = 0.7 + (memories.Count * 0.05),
+            Priority = priority,
+            TargetDrive = targetDrive,
+            Reason = reason,
+            IsAiDecision = false
+        };
+    }
+
+    #endregion
 
     public void Dispose()
     {

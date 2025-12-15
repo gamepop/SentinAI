@@ -11,6 +11,9 @@ public class FileCluster
     public FileClusterType Type { get; set; }
     public string PrimaryFileType { get; set; } = "";
 
+    // Actual file paths in this cluster (for safe relocation)
+    public List<string> FilePaths { get; set; } = new();
+
     // Size and count
     public long TotalBytes { get; set; }
     public int FileCount { get; set; }

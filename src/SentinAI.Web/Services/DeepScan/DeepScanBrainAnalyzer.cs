@@ -25,6 +25,7 @@ public class DeepScanBrainAnalyzer
 
     /// <summary>
     /// Analyzes an app for removal recommendation with RAG context.
+    /// Uses Phi-4 Mini AI model when available, falls back to heuristics.
     /// </summary>
     public async Task<AppRemovalRecommendation> AnalyzeAppForRemovalAsync(
         InstalledApp app,
@@ -36,19 +37,45 @@ public class DeepScanBrainAnalyzer
         var similarDecisions = await _ragStore.FindSimilarAppDecisionsAsync(app);
         var publisherPatterns = await _ragStore.GetAppRemovalPatternsAsync(app.Publisher);
 
-        // Use heuristics + learning patterns (AI prompt analysis will be added when brain supports it)
-        var (shouldRemove, confidence, category, reason) = AnalyzeAppWithHeuristics(app, similarDecisions, publisherPatterns);
+        // Use AI model if available, otherwise fall back to heuristics
+        DeepScanAiDecision aiDecision;
+        if (_brain.IsModelLoaded)
+        {
+            _logger.LogDebug("Using AI model for app analysis: {App}", app.Name);
+            aiDecision = await _brain.AnalyzeAppRemovalAsync(app, similarDecisions, publisherPatterns, ct);
+        }
+        else
+        {
+            _logger.LogDebug("AI model not loaded, using heuristics for app analysis: {App}", app.Name);
+            var (shouldRemove, confidence, category, reason) = AnalyzeAppWithHeuristics(app, similarDecisions, publisherPatterns);
+            confidence = AdjustConfidence(confidence, similarDecisions);
+            aiDecision = new DeepScanAiDecision
+            {
+                ShouldProceed = shouldRemove,
+                Confidence = confidence,
+                Category = category.ToString(),
+                Reason = reason,
+                IsAiDecision = false
+            };
+        }
 
-        // Adjust confidence based on learning
-        confidence = AdjustConfidence(confidence, similarDecisions);
+        // Parse category from AI decision
+        var parsedCategory = aiDecision.Category switch
+        {
+            "Bloatware" => AppRemovalCategory.Bloatware,
+            "Unused" => AppRemovalCategory.Unused,
+            "LargeUnused" => AppRemovalCategory.LargeUnused,
+            "KeepRecommended" => AppRemovalCategory.KeepRecommended,
+            _ => AppRemovalCategory.Optional
+        };
 
         var recommendation = new AppRemovalRecommendation
         {
             App = app,
-            ShouldRemove = shouldRemove,
-            Confidence = confidence,
-            Category = category,
-            AiReason = reason,
+            ShouldRemove = aiDecision.ShouldProceed,
+            Confidence = aiDecision.Confidence,
+            Category = parsedCategory,
+            AiReason = aiDecision.Reason,
             CanUninstall = app.CanUninstall,
             CanClearData = app.DataSizeBytes > 0,
             CanClearCache = app.CanClearCache,
@@ -64,6 +91,7 @@ public class DeepScanBrainAnalyzer
 
     /// <summary>
     /// Analyzes files for relocation recommendation with RAG context.
+    /// Uses Phi-4 Mini AI model when available, falls back to heuristics.
     /// </summary>
     public async Task<RelocationRecommendation> AnalyzeFilesForRelocationAsync(
         FileCluster cluster,
@@ -75,21 +103,39 @@ public class DeepScanBrainAnalyzer
         var similarDecisions = await _ragStore.FindSimilarFileDecisionsAsync(cluster);
         var fileTypePattern = await _ragStore.GetRelocationPatternsAsync(cluster.PrimaryFileType);
 
-        // Use heuristics + learning patterns
-        var (shouldRelocate, priority, targetDrive, reason) = AnalyzeRelocationWithHeuristics(cluster, similarDecisions, fileTypePattern);
-
-        var confidence = 0.7 + (similarDecisions.Count * 0.05); // Base + learning boost
-        confidence = Math.Min(confidence, 0.95);
+        // Use AI model if available, otherwise fall back to heuristics
+        DeepScanAiDecision aiDecision;
+        if (_brain.IsModelLoaded)
+        {
+            _logger.LogDebug("Using AI model for relocation analysis: {Path}", cluster.BasePath);
+            aiDecision = await _brain.AnalyzeRelocationAsync(cluster, similarDecisions, fileTypePattern, ct);
+        }
+        else
+        {
+            _logger.LogDebug("AI model not loaded, using heuristics for relocation analysis: {Path}", cluster.BasePath);
+            var (shouldRelocate, priority, targetDrive, reason) = AnalyzeRelocationWithHeuristics(cluster, similarDecisions, fileTypePattern);
+            var confidence = 0.7 + (similarDecisions.Count * 0.05);
+            confidence = Math.Min(confidence, 0.95);
+            aiDecision = new DeepScanAiDecision
+            {
+                ShouldProceed = shouldRelocate,
+                Confidence = confidence,
+                Priority = priority,
+                TargetDrive = targetDrive,
+                Reason = reason,
+                IsAiDecision = false
+            };
+        }
 
         var recommendation = new RelocationRecommendation
         {
             Cluster = cluster,
-            ShouldRelocate = shouldRelocate && cluster.CanRelocate,
-            Priority = priority,
-            TargetDrive = targetDrive ?? cluster.AvailableDrives.FirstOrDefault()?.Letter,
-            Confidence = confidence,
+            ShouldRelocate = aiDecision.ShouldProceed && cluster.CanRelocate,
+            Priority = aiDecision.Priority ?? 3,
+            TargetDrive = aiDecision.TargetDrive ?? cluster.AvailableDrives.FirstOrDefault()?.Letter,
+            Confidence = aiDecision.Confidence,
             RequiresJunction = cluster.RequiresJunction,
-            AiReason = reason,
+            AiReason = aiDecision.Reason,
             SimilarPastDecisions = similarDecisions.Count,
             LearnedInfluence = BuildFileLearnedInfluenceText(similarDecisions, fileTypePattern)
         };

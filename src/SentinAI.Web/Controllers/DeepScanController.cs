@@ -15,6 +15,7 @@ public class DeepScanController : ControllerBase
     private readonly DriveManagerService _driveManager;
     private readonly DeepScanLearningService _learningService;
     private readonly IDeepScanRagStore _ragStore;
+    private readonly IDeepScanSessionStore _sessionStore;
     private readonly ILogger<DeepScanController> _logger;
 
     public DeepScanController(
@@ -23,6 +24,7 @@ public class DeepScanController : ControllerBase
         DriveManagerService driveManager,
         DeepScanLearningService learningService,
         IDeepScanRagStore ragStore,
+        IDeepScanSessionStore sessionStore,
         ILogger<DeepScanController> logger)
     {
         _deepScanService = deepScanService;
@@ -30,6 +32,7 @@ public class DeepScanController : ControllerBase
         _driveManager = driveManager;
         _learningService = learningService;
         _ragStore = ragStore;
+        _sessionStore = sessionStore;
         _logger = logger;
     }
 
@@ -368,9 +371,125 @@ public class DeepScanController : ControllerBase
             return StatusCode(500, new { error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Approves or rejects an app removal recommendation.
+    /// </summary>
+    [HttpPost("{sessionId:guid}/app/{appId}/status")]
+    public async Task<ActionResult> UpdateAppStatus(Guid sessionId, string appId, [FromBody] UpdateStatusRequest request)
+    {
+        try
+        {
+            var session = await _deepScanService.GetSessionAsync(sessionId);
+            if (session == null)
+            {
+                return NotFound(new { error = "Session not found" });
+            }
+
+            var recommendation = session.AppRemovalRecommendations?.FirstOrDefault(r => r.App?.Id == appId);
+            if (recommendation == null)
+            {
+                return NotFound(new { error = "Recommendation not found" });
+            }
+
+            recommendation.Status = request.Approved ? RecommendationStatus.Approved : RecommendationStatus.Rejected;
+
+            // Save the session to persist the status change
+            await _sessionStore.SaveSessionAsync(session);
+
+            // Record learning
+            await _deepScanService.RecordAppFeedbackAsync(recommendation, request.Approved);
+
+            return Ok(new { message = "Status updated" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update app status for session {SessionId}", sessionId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Approves or rejects a relocation recommendation.
+    /// </summary>
+    [HttpPost("{sessionId:guid}/relocation/{clusterId}/status")]
+    public async Task<ActionResult> UpdateRelocationStatus(Guid sessionId, string clusterId, [FromBody] UpdateStatusRequest request)
+    {
+        try
+        {
+            var session = await _deepScanService.GetSessionAsync(sessionId);
+            if (session == null)
+            {
+                return NotFound(new { error = "Session not found" });
+            }
+
+            var recommendation = session.RelocationRecommendations?.FirstOrDefault(r => r.Cluster?.Id == clusterId);
+            if (recommendation == null)
+            {
+                return NotFound(new { error = "Recommendation not found" });
+            }
+
+            recommendation.Status = request.Approved ? RecommendationStatus.Approved : RecommendationStatus.Rejected;
+
+            // Save the session to persist the status change
+            await _sessionStore.SaveSessionAsync(session);
+
+            // Record learning
+            await _deepScanService.RecordRelocationFeedbackAsync(recommendation, request.Approved, recommendation.TargetDrive);
+
+            return Ok(new { message = "Status updated" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update relocation status for session {SessionId}", sessionId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Approves or rejects a cleanup opportunity.
+    /// </summary>
+    [HttpPost("{sessionId:guid}/cleanup/{cleanupId}/status")]
+    public async Task<ActionResult> UpdateCleanupStatus(Guid sessionId, string cleanupId, [FromBody] UpdateStatusRequest request)
+    {
+        try
+        {
+            var session = await _deepScanService.GetSessionAsync(sessionId);
+            if (session == null)
+            {
+                return NotFound(new { error = "Session not found" });
+            }
+
+            var opportunity = session.CleanupOpportunities?.FirstOrDefault(o => o.Id == cleanupId);
+            if (opportunity == null)
+            {
+                return NotFound(new { error = "Opportunity not found" });
+            }
+
+            opportunity.Status = request.Approved ? RecommendationStatus.Approved : RecommendationStatus.Rejected;
+
+            // Save the session to persist the status change
+            await _sessionStore.SaveSessionAsync(session);
+
+            // Record learning
+            await _deepScanService.RecordCleanupFeedbackAsync(opportunity, request.Approved);
+
+            return Ok(new { message = "Status updated" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update cleanup status for session {SessionId}", sessionId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
 }
 
 // Request DTOs
+public class UpdateStatusRequest
+{
+    public bool Approved { get; set; }
+}
+
 public class AppFeedbackRequest
 {
     public AppRemovalRecommendation? Recommendation { get; set; }

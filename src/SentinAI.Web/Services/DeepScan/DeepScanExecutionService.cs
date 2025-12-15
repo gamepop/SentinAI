@@ -612,14 +612,46 @@ public class DeepScanExecutionService
         string targetDrive,
         CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(cluster.BasePath) || !Directory.Exists(cluster.BasePath))
+        // Use the stored file list if available (safe relocation)
+        // Otherwise fall back to directory enumeration (legacy behavior)
+        var filesToMove = cluster.FilePaths?.Where(File.Exists).ToList();
+
+        if (filesToMove == null || filesToMove.Count == 0)
         {
-            return (false, 0, "Source path not found");
+            // Legacy fallback - but only if BasePath is a specific directory, not a drive root
+            if (string.IsNullOrEmpty(cluster.BasePath) || !Directory.Exists(cluster.BasePath))
+            {
+                return (false, 0, "Source path not found");
+            }
+
+            // Safety check: don't enumerate from drive root or system folders
+            var pathRoot = Path.GetPathRoot(cluster.BasePath);
+            if (string.Equals(cluster.BasePath.TrimEnd(Path.DirectorySeparatorChar), pathRoot?.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            {
+                return (false, 0, "Cannot relocate from drive root - files are too scattered");
+            }
+
+            // Check for system/protected folders
+            var protectedFolders = new[] { "Windows", "Program Files", "Program Files (x86)", "Config.Msi", "$Recycle.Bin", "System Volume Information" };
+            var folderName = new DirectoryInfo(cluster.BasePath).Name;
+            if (protectedFolders.Any(p => folderName.Equals(p, StringComparison.OrdinalIgnoreCase)))
+            {
+                return (false, 0, $"Cannot relocate protected system folder: {folderName}");
+            }
+
+            filesToMove = Directory.EnumerateFiles(cluster.BasePath, "*", SearchOption.AllDirectories).ToList();
         }
 
-        // Determine target path
-        var sourceDir = new DirectoryInfo(cluster.BasePath);
-        var targetBase = Path.Combine(targetDrive, "Relocated", sourceDir.Name);
+        if (filesToMove.Count == 0)
+        {
+            return (false, 0, "No files found to relocate");
+        }
+
+        // Determine target path - use cluster name for scattered files, directory name otherwise
+        var targetFolderName = !string.IsNullOrEmpty(cluster.BasePath) && Directory.Exists(cluster.BasePath)
+            ? new DirectoryInfo(cluster.BasePath).Name
+            : cluster.Name.Replace(" ", "_");
+        var targetBase = Path.Combine(targetDrive, "Relocated", targetFolderName);
 
         // Ensure target directory exists
         Directory.CreateDirectory(targetBase);
@@ -628,14 +660,27 @@ public class DeepScanExecutionService
         var errors = new List<string>();
         var fileCount = 0;
 
-        // Move all files from the cluster's base path
-        foreach (var filePath in Directory.EnumerateFiles(cluster.BasePath, "*", SearchOption.AllDirectories))
+        // Move only the files in our list
+        foreach (var filePath in filesToMove)
         {
             ct.ThrowIfCancellationRequested();
 
             try
             {
-                var relativePath = Path.GetRelativePath(cluster.BasePath, filePath);
+                // Calculate relative path - use BasePath if valid, otherwise use file's directory
+                string relativePath;
+                if (!string.IsNullOrEmpty(cluster.BasePath) && filePath.StartsWith(cluster.BasePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    relativePath = Path.GetRelativePath(cluster.BasePath, filePath);
+                }
+                else
+                {
+                    // For scattered files, preserve some directory structure based on file location
+                    var fileDir = Path.GetDirectoryName(filePath);
+                    var fileName = Path.GetFileName(filePath);
+                    var parentDir = fileDir != null ? new DirectoryInfo(fileDir).Name : "";
+                    relativePath = Path.Combine(parentDir, fileName);
+                }
                 var targetPath = Path.Combine(targetBase, relativePath);
 
                 // Ensure subdirectory exists
